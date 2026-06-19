@@ -24,6 +24,9 @@ Simplifies DLQ monitoring and storage. Failed messages carry their channel as me
 **Scheduler polls DB directly, publishes to channel topics**
 Simpler than a separate `notifyx.scheduled` Kafka topic. The scheduler is a thin cron layer — adding a Kafka intermediary adds complexity with no benefit at this scale.
 
+**segmentio/kafka-go over confluent-kafka-go (deviation from original plan)**
+confluent-kafka-go requires librdkafka (a CGO/C library) which wasn't available in the dev environment and complicates Docker builds. segmentio/kafka-go is pure Go, speaks the same wire protocol, and supports SASL_SSL/PLAIN against Confluent Cloud — no functional loss for this project's needs.
+
 ---
 
 ## Channels

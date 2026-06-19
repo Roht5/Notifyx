@@ -19,11 +19,12 @@ Tenant management and API key authentication.
 
 ## Phase 3 — Kafka Infrastructure
 Producer and consumer scaffolding before any channel is wired up.
-- [ ] Confluent Kafka client setup
-- [ ] Producer (publish to per-channel topics)
-- [ ] Consumer base (reusable worker loop with retry + backoff)
-- [ ] DLQ consumer (reads notifyx.dlq, persists to dlq_messages)
-- [ ] Per-channel consumer stubs (email, push, sms, inapp)
+- [x] Kafka client setup (segmentio/kafka-go, not confluent-kafka-go — see decisions.md)
+- [x] Producer (publish to per-channel topics)
+- [x] Consumer base (reusable worker loop with retry + backoff)
+- [x] DLQ consumer (reads notifyx.dlq, persists to dlq_messages)
+- [x] Per-channel consumer stubs (email, push, sms, inapp)
+- [x] Conditional startup wiring in main.go (KAFKA_BOOTSTRAP_SERVERS) + graceful shutdown
 
 ## Phase 4 — Notification Core
 Send, batch, history, and delivery tracking — without channel providers yet (stub delivery).
