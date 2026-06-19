@@ -9,7 +9,11 @@ import (
 	"github.com/segmentio/kafka-go"
 	"github.com/segmentio/kafka-go/sasl/plain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
+	"github.com/rohit-bagade/notifyx/internal/tracing"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Producer wraps a kafka.Writer configured for Confluent Cloud (SASL_SSL / PLAIN).
@@ -71,8 +75,17 @@ func New(bootstrapServers, apiKey, apiSecret string, log *logger.Logger) (*Produ
 // (e.g. a retry republish) land on the same partition and stay in order, while
 // different notifications spread across partitions for parallelism.
 func (p *Producer) Publish(ctx context.Context, topic string, msg *kafkatypes.Message) error {
+	ctx, span := tracing.Tracer().Start(ctx, "kafka.publish",
+		trace.WithAttributes(
+			attribute.String("topic", topic),
+			attribute.String("notification_id", msg.NotificationID.String()),
+			attribute.String("channel", string(msg.Channel)),
+		))
+	defer span.End()
+
 	payload, err := json.Marshal(msg)
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("marshal kafka message: %w", err)
 	}
 
@@ -86,6 +99,7 @@ func (p *Producer) Publish(ctx context.Context, topic string, msg *kafkatypes.Me
 		},
 	})
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("write kafka message to %s: %w", topic, err)
 	}
 

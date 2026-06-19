@@ -25,6 +25,7 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	redisrepo "github.com/rohit-bagade/notifyx/internal/repository/redis"
 	"github.com/rohit-bagade/notifyx/internal/scheduler"
+	"github.com/rohit-bagade/notifyx/internal/tracing"
 	"github.com/rohit-bagade/notifyx/internal/ws"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
@@ -59,6 +60,20 @@ func main() {
 
 	if err := postgres.RunMigrations(cfg.DatabaseURL, "migrations", log); err != nil {
 		log.Fatal("migration failed", "error", err)
+	}
+
+	// Tracing — spans are written as JSON lines to traces.jsonl rather than shipped to a
+	// collector, since this deployment has no OTel collector/Jaeger backend running. Good
+	// enough to inspect the send → publish → consume → channel-send span chain locally;
+	// swapping the exporter for an OTLP one later is a one-line change in tracing.Init.
+	traceFile, err := os.OpenFile("traces.jsonl", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatal("open trace file failed", "error", err)
+	}
+	defer traceFile.Close()
+	shutdownTracing, err := tracing.Init(context.Background(), cfg.Env, traceFile)
+	if err != nil {
+		log.Fatal("tracing init failed", "error", err)
 	}
 
 	ctx := context.Background()
@@ -241,6 +256,10 @@ func main() {
 	defer cancel()
 	if err := e.Shutdown(shutdownCtx); err != nil {
 		log.Errorw("server shutdown error", "error", err)
+	}
+
+	if err := shutdownTracing(shutdownCtx); err != nil {
+		log.Errorw("tracing shutdown error", "error", err)
 	}
 
 	log.Infow("Notifyx stopped")

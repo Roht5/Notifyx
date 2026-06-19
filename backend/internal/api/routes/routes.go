@@ -3,8 +3,10 @@ package routes
 import (
 	"github.com/labstack/echo/v4"
 	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rohit-bagade/notifyx/internal/api/handlers"
 	"github.com/rohit-bagade/notifyx/internal/api/middleware"
+	"github.com/rohit-bagade/notifyx/internal/metrics"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/internal/ws"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
@@ -28,6 +30,7 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	e.Use(echomw.RequestID())            // adds X-Request-ID header
 	e.Use(middleware.RequestLogger(log)) // structured Zap request logging
 	e.Use(echomw.Recover())              // recover from panics, return 500
+	e.Use(metrics.EchoMiddleware())      // Prometheus request latency histogram
 	// CORS — needed once the Flutter Web dashboard (Phase 12) calls this API from a
 	// different origin. AllowOrigins is "*" for now since the dashboard is unauthenticated
 	// (see decisions.md); tighten to the deployed dashboard origin once one exists.
@@ -40,6 +43,9 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 
 	// Health — no auth required (used by Render's health check probe).
 	e.GET("/health", h.Health.Check)
+
+	// Metrics — no auth required (scraped by Prometheus, see docker/prometheus.yml).
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 
 	// In-app WebSocket connect — auth is via apiKey query param, not the X-API-Key header
 	// middleware, since browsers' WebSocket API can't set custom handshake headers. Auth is

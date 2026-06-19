@@ -3,11 +3,13 @@ package consumers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rohit-bagade/notifyx/internal/channels/email"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/metrics"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
@@ -23,7 +25,9 @@ func NewEmailConsumer(cfg Config, prod *producer.Producer, client *email.Client,
 			return fmt.Errorf("email handler: missing recipient_email")
 		}
 
+		start := time.Now()
 		id, err := client.Send(ctx, msg.RecipientEmail, msg.Subject, msg.Body)
+		metrics.ChannelSendDuration.WithLabelValues(string(domain.ChannelEmail)).Observe(time.Since(start).Seconds())
 		if err != nil {
 			return fmt.Errorf("resend send failed: %w", err)
 		}
@@ -31,6 +35,7 @@ func NewEmailConsumer(cfg Config, prod *producer.Producer, client *email.Client,
 		if err := deliveries.UpdateStatus(ctx, msg.DeliveryID, domain.StatusDelivered, ""); err != nil {
 			log.Errorw("email: mark delivered failed", "notification_id", msg.NotificationID, "error", err)
 		}
+		metrics.NotificationsTotal.WithLabelValues(string(domain.ChannelEmail), string(domain.StatusDelivered)).Inc()
 
 		log.Infow("email delivered",
 			"notification_id", msg.NotificationID,

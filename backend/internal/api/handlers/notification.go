@@ -16,10 +16,14 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/metrics"
 	"github.com/rohit-bagade/notifyx/internal/ratelimit"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	tmplrender "github.com/rohit-bagade/notifyx/internal/template"
+	"github.com/rohit-bagade/notifyx/internal/tracing"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // NotificationService groups the repositories and infra clients the notification handler
@@ -693,6 +697,13 @@ func (h *NotificationHandler) releaseDedup(ctx context.Context, idempotencyKey s
 // publishing is skipped and a warning is logged — the notification still persists so it
 // isn't lost once Kafka is wired up.
 func (h *NotificationHandler) createAndQueue(ctx context.Context, p postgres.CreateNotificationParams, publish bool) (*domain.Notification, *domain.NotificationDelivery, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "notification.create_and_queue",
+		trace.WithAttributes(
+			attribute.String("channel", string(p.Channel)),
+			attribute.String("tenant_id", p.TenantID.String()),
+		))
+	defer span.End()
+
 	var notification *domain.Notification
 	var delivery *domain.NotificationDelivery
 
@@ -741,5 +752,6 @@ func (h *NotificationHandler) createAndQueue(ctx context.Context, p postgres.Cre
 		return nil, nil, err
 	}
 
+	metrics.NotificationsTotal.WithLabelValues(string(p.Channel), string(p.Status)).Inc()
 	return notification, delivery, nil
 }

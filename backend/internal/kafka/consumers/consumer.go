@@ -11,7 +11,12 @@ import (
 	"github.com/segmentio/kafka-go/sasl/plain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/metrics"
+	"github.com/rohit-bagade/notifyx/internal/tracing"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const maxRetries = 3
@@ -156,7 +161,17 @@ func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) bool {
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		lastErr = c.handler(ctx, &msg)
+		attemptCtx, span := tracing.Tracer().Start(ctx, "kafka.consume",
+			trace.WithAttributes(
+				attribute.String("topic", c.topic),
+				attribute.String("notification_id", msg.NotificationID.String()),
+				attribute.Int("attempt", attempt),
+			))
+		lastErr = c.handler(attemptCtx, &msg)
+		if lastErr != nil {
+			span.SetStatus(codes.Error, lastErr.Error())
+		}
+		span.End()
 		if lastErr == nil {
 			return true // success
 		}
@@ -168,6 +183,9 @@ func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) bool {
 			"max_retries", maxRetries,
 			"error", lastErr,
 		)
+		if attempt > 1 {
+			metrics.RetriesTotal.WithLabelValues(c.topic).Inc()
+		}
 
 		if attempt < maxRetries {
 			select {
@@ -202,6 +220,7 @@ func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) bool {
 		)
 		return false
 	}
+	metrics.DLQTotal.WithLabelValues(c.topic).Inc()
 	return true
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
+	"github.com/rohit-bagade/notifyx/internal/metrics"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
@@ -36,6 +37,7 @@ func NewDLQConsumer(cfg Config, dlqRepo *postgres.DLQRepository, notifications *
 		if err := notifications.UpdateStatus(ctx, msg.NotificationID, domain.StatusFailed); err != nil {
 			log.Errorw("DLQ: mark notification failed failed", "notification_id", msg.NotificationID, "error", err)
 		}
+		metrics.NotificationsTotal.WithLabelValues(string(msg.Channel), string(domain.StatusFailed)).Inc()
 
 		log.Infow("DLQ message persisted",
 			"notification_id", msg.NotificationID,

@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: notifyx
+    static_configs:
+      # "host.docker.internal" resolves to the host machine from inside the
+      # Prometheus container when the Go server runs outside docker-compose
+      # (e.g. `go run ./cmd/server` locally) — change to the compose service
+      # name (e.g. "notifyx-api:8080") once main.go's API container is added
+      # in Phase 13's docker-compose.yml.
+      - targets: ["host.docker.internal:8080"]

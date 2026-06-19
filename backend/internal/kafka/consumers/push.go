@@ -3,11 +3,13 @@ package consumers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rohit-bagade/notifyx/internal/channels/push"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/metrics"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
@@ -21,7 +23,9 @@ func NewPushConsumer(cfg Config, prod *producer.Producer, client *push.Client, d
 			return fmt.Errorf("push handler: missing recipient_token")
 		}
 
+		start := time.Now()
 		name, err := client.Send(ctx, msg.RecipientToken, msg.Subject, msg.Body)
+		metrics.ChannelSendDuration.WithLabelValues(string(domain.ChannelPush)).Observe(time.Since(start).Seconds())
 		if err != nil {
 			return fmt.Errorf("fcm send failed: %w", err)
 		}
@@ -29,6 +33,7 @@ func NewPushConsumer(cfg Config, prod *producer.Producer, client *push.Client, d
 		if err := deliveries.UpdateStatus(ctx, msg.DeliveryID, domain.StatusDelivered, ""); err != nil {
 			log.Errorw("push: mark delivered failed", "notification_id", msg.NotificationID, "error", err)
 		}
+		metrics.NotificationsTotal.WithLabelValues(string(domain.ChannelPush), string(domain.StatusDelivered)).Inc()
 
 		log.Infow("push delivered",
 			"notification_id", msg.NotificationID,

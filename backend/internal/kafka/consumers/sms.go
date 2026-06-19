@@ -3,11 +3,13 @@ package consumers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rohit-bagade/notifyx/internal/channels/sms"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/metrics"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
@@ -21,7 +23,9 @@ func NewSMSConsumer(cfg Config, prod *producer.Producer, client *sms.Client, del
 			return fmt.Errorf("sms handler: missing recipient_phone")
 		}
 
+		start := time.Now()
 		requestID, err := client.Send(ctx, msg.RecipientPhone, msg.Body)
+		metrics.ChannelSendDuration.WithLabelValues(string(domain.ChannelSMS)).Observe(time.Since(start).Seconds())
 		if err != nil {
 			return fmt.Errorf("fast2sms send failed: %w", err)
 		}
@@ -29,6 +33,7 @@ func NewSMSConsumer(cfg Config, prod *producer.Producer, client *sms.Client, del
 		if err := deliveries.UpdateStatus(ctx, msg.DeliveryID, domain.StatusDelivered, ""); err != nil {
 			log.Errorw("sms: mark delivered failed", "notification_id", msg.NotificationID, "error", err)
 		}
+		metrics.NotificationsTotal.WithLabelValues(string(domain.ChannelSMS), string(domain.StatusDelivered)).Inc()
 
 		log.Infow("sms delivered",
 			"notification_id", msg.NotificationID,

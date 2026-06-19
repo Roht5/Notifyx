@@ -83,10 +83,10 @@ Per-tenant analytics API consumed by the Flutter dashboard.
 
 ## Phase 11 — Observability
 Structured logging, metrics, and tracing wired across all layers.
-- [ ] Zap structured logging in all handlers + consumers
-- [ ] Prometheus metrics (notification counts, delivery rates, retry counts, DLQ counts, latency)
-- [ ] OpenTelemetry tracing (API → Kafka → consumer → channel)
-- [ ] Grafana dashboard config (docker-compose local)
+- [x] Zap structured logging in all handlers + consumers
+- [x] Prometheus metrics (notification counts, delivery rates, retry counts, DLQ counts, latency)
+- [x] OpenTelemetry tracing (API → Kafka → consumer → channel)
+- [x] Grafana dashboard config (docker-compose local)
 
 ## Phase 12 — Flutter Dashboard
 All 6 screens using Bloc state management.

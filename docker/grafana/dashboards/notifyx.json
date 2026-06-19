@@ -1,0 +1,75 @@
+{
+  "title": "Notifyx Overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Notifications/sec by channel + status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(notifyx_notifications_total[5m])) by (channel, status)",
+          "legendFormat": "{{channel}} - {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "DLQ messages/sec by channel",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(notifyx_dlq_total[5m])) by (channel)",
+          "legendFormat": "{{channel}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Retry attempts/sec by channel",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(notifyx_retries_total[5m])) by (channel)",
+          "legendFormat": "{{channel}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Channel send latency (p50/p95/p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(notifyx_channel_send_duration_seconds_bucket[5m])) by (le, channel))",
+          "legendFormat": "p50 - {{channel}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(notifyx_channel_send_duration_seconds_bucket[5m])) by (le, channel))",
+          "legendFormat": "p95 - {{channel}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(notifyx_channel_send_duration_seconds_bucket[5m])) by (le, channel))",
+          "legendFormat": "p99 - {{channel}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "HTTP request latency (p95) by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(notifyx_http_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    }
+  ]
+}
