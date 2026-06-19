@@ -3,6 +3,7 @@ package postgres
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	// Register the pgx/v5 driver for golang-migrate.
@@ -22,13 +23,15 @@ func RunMigrations(databaseURL string, migrationsPath string, log *logger.Logger
 	}
 
 	// golang-migrate's pgx/v5 driver expects the "pgx5://" scheme prefix.
-	// We replace the standard "postgres://" prefix to match what the driver expects.
-	connStr := databaseURL
+	// We replace the standard "postgres://" or "postgresql://" prefix to match.
+	var connStr string
 	switch {
-	case len(databaseURL) > 11 && databaseURL[:11] == "postgresql://":
-		connStr = "pgx5://" + databaseURL[13:]
-	case len(databaseURL) > 11 && databaseURL[:11] == "postgres://":
-		connStr = "pgx5://" + databaseURL[11:]
+	case strings.HasPrefix(databaseURL, "postgresql://"):
+		connStr = "pgx5://" + databaseURL[len("postgresql://"):]
+	case strings.HasPrefix(databaseURL, "postgres://"):
+		connStr = "pgx5://" + databaseURL[len("postgres://"):]
+	default:
+		connStr = databaseURL
 	}
 
 	m, err := migrate.New("file://"+migrationsPath, connStr)

@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS dlq_messages;
+DROP TABLE IF EXISTS dlq_messages CASCADE;

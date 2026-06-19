@@ -16,4 +16,5 @@ type NotificationTemplate struct {
 	Subject   string // only used for email; empty for other channels
 	Body      string
 	CreatedAt time.Time
+	UpdatedAt time.Time
 }

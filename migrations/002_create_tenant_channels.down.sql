@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS tenant_channels;
+DROP TABLE IF EXISTS tenant_channels CASCADE;
