@@ -16,6 +16,11 @@ import (
 
 const maxRetries = 3
 
+// fetchErrorBackoff is how long Run waits after a non-shutdown FetchMessage error
+// before retrying — without it, a persistent broker/network problem turns into a
+// tight CPU- and log-flooding loop.
+const fetchErrorBackoff = 2 * time.Second
+
 // backoff durations between successive retry attempts.
 // Attempt 1 fails → wait 1s → attempt 2 fails → wait 2s → attempt 3 fails → DLQ.
 var retryBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
@@ -102,13 +107,27 @@ func (c *Consumer) Run(ctx context.Context) {
 				return // clean shutdown
 			}
 			c.log.Errorw("fetch message failed", "topic", c.topic, "error", err)
+			select {
+			case <-time.After(fetchErrorBackoff):
+			case <-ctx.Done():
+				return
+			}
 			continue
 		}
 
-		c.handleWithRetry(ctx, km)
+		// Only commit when the message was either handled successfully or safely
+		// handed off to the DLQ. Committing unconditionally (the old behavior) lost
+		// messages whenever a shutdown interrupted retries or the DLQ publish itself
+		// failed — the offset advanced past a message nobody ever durably recorded.
+		if !c.handleWithRetry(ctx, km) {
+			if ctx.Err() != nil {
+				return // shutdown mid-retry — leave the offset uncommitted, redeliver on restart
+			}
+			c.log.Errorw("message not safely handled — leaving offset uncommitted",
+				"topic", c.topic, "offset", km.Offset)
+			continue
+		}
 
-		// Commit the offset after processing — whether succeeded or sent to DLQ.
-		// This prevents re-reading a message we have already handled.
 		if err := c.reader.CommitMessages(ctx, km); err != nil {
 			if ctx.Err() != nil {
 				return
@@ -118,7 +137,12 @@ func (c *Consumer) Run(ctx context.Context) {
 	}
 }
 
-func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) {
+// handleWithRetry processes km, retrying on failure, and reports whether it's safe
+// to commit the offset: true on success, on a malformed/unprocessable message, or
+// once the message has been durably published to the DLQ; false if retries were
+// exhausted and the DLQ publish itself failed — committing in that case would lose
+// the message permanently with no record anywhere.
+func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) bool {
 	var msg kafkatypes.Message
 	if err := json.Unmarshal(km.Value, &msg); err != nil {
 		// Malformed message — cannot retry or DLQ meaningfully, skip it.
@@ -127,14 +151,14 @@ func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) {
 			"offset", km.Offset,
 			"error", err,
 		)
-		return
+		return true
 	}
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		lastErr = c.handler(ctx, &msg)
 		if lastErr == nil {
-			return // success
+			return true // success
 		}
 
 		c.log.Warnw("handler failed",
@@ -149,7 +173,7 @@ func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) {
 			select {
 			case <-time.After(retryBackoff[attempt-1]):
 			case <-ctx.Done():
-				return
+				return false // shutdown mid-retry, do not commit
 			}
 		}
 	}
@@ -162,20 +186,23 @@ func (c *Consumer) handleWithRetry(ctx context.Context, km kafka.Message) {
 	)
 
 	if c.producer == nil {
-		// DLQ consumer itself — drop to avoid an infinite DLQ loop.
+		// DLQ consumer itself — drop to avoid an infinite DLQ loop. This is a
+		// terminal drop, not data loss we can recover from by holding the offset.
 		c.log.Errorw("DLQ handler failed after retries — dropping message to prevent loop",
 			"notification_id", msg.NotificationID,
 		)
-		return
+		return true
 	}
 
-	// Publish to DLQ so the message is not lost.
+	msg.LastError = lastErr.Error()
 	if err := c.producer.Publish(ctx, kafkatypes.TopicDLQ, &msg); err != nil {
-		c.log.Errorw("DLQ publish failed",
+		c.log.Errorw("DLQ publish failed — message will be redelivered",
 			"notification_id", msg.NotificationID,
 			"error", err,
 		)
+		return false
 	}
+	return true
 }
 
 // Close stops the underlying reader. Prefer cancelling the context passed to Run;

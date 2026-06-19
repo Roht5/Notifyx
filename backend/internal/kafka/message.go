@@ -45,4 +45,8 @@ type Message struct {
 	Subject        string          `json:"subject,omitempty"`
 	Body           string          `json:"body"`
 	Metadata       map[string]any  `json:"metadata,omitempty"`
+	// LastError carries the final handler error when a message exhausts retries and
+	// is republished to the DLQ — lets the DLQ consumer record the real root cause
+	// instead of a generic "exhausted delivery retries" string.
+	LastError string `json:"last_error,omitempty"`
 }

@@ -17,7 +17,11 @@ import (
 // to prevent an infinite retry loop.
 func NewDLQConsumer(cfg Config, dlqRepo *postgres.DLQRepository, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
-		if err := dlqRepo.Create(ctx, msg, "exhausted delivery retries"); err != nil {
+		reason := msg.LastError
+		if reason == "" {
+			reason = "exhausted delivery retries (no error recorded)"
+		}
+		if err := dlqRepo.Create(ctx, msg, reason); err != nil {
 			return fmt.Errorf("persist to dlq_messages: %w", err)
 		}
 		log.Infow("DLQ message persisted",

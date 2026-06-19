@@ -44,10 +44,21 @@ func New(bootstrapServers, apiKey, apiSecret string, log *logger.Logger) (*Produ
 	// Writer without a fixed topic — we set the topic per-message so one writer
 	// can publish to all notifyx.* topics.
 	w := &kafka.Writer{
-		Addr:         kafka.TCP(bootstrapServers),
-		Transport:    transport,
-		Balancer:     &kafka.Hash{}, // hash on message key (priority) for consistent routing
-		RequiredAcks: kafka.RequireOne,
+		Addr:      kafka.TCP(bootstrapServers),
+		Transport: transport,
+		// Hash on notification ID, not priority — priority only has 3-4 distinct
+		// values, so keying on it sends every message of a given priority to the
+		// same partition regardless of partition count, which defeats the purpose
+		// of having multiple partitions (no parallelism across consumers within a
+		// priority class). Notification ID is high-cardinality and spreads load
+		// evenly while still routing all of one notification's messages (e.g. a
+		// retry republish) to the same partition for ordering.
+		Balancer: &kafka.Hash{},
+		// RequireAll: wait for all in-sync replicas to ack, not just the leader.
+		// RequireOne risks losing a message if the leader fails right after acking
+		// but before the write replicates — unacceptable for a delivery pipeline
+		// that already promises retry + DLQ guarantees downstream.
+		RequiredAcks: kafka.RequireAll,
 		Async:        false, // synchronous — Publish blocks until broker acks
 	}
 
@@ -56,8 +67,9 @@ func New(bootstrapServers, apiKey, apiSecret string, log *logger.Logger) (*Produ
 }
 
 // Publish serialises msg to JSON and writes it to topic.
-// The message key is set to the notification priority so that messages with the
-// same priority always land on the same partition and are processed in order.
+// The message key is the notification ID, so all messages for one notification
+// (e.g. a retry republish) land on the same partition and stay in order, while
+// different notifications spread across partitions for parallelism.
 func (p *Producer) Publish(ctx context.Context, topic string, msg *kafkatypes.Message) error {
 	payload, err := json.Marshal(msg)
 	if err != nil {
@@ -66,9 +78,7 @@ func (p *Producer) Publish(ctx context.Context, topic string, msg *kafkatypes.Me
 
 	err = p.writer.WriteMessages(ctx, kafka.Message{
 		Topic: topic,
-		// Partition key = priority. Confluent Cloud with default partitioner
-		// will hash this key, so same-priority messages land on the same partition.
-		Key:   []byte(string(msg.Priority)),
+		Key:   []byte(msg.NotificationID.String()),
 		Value: payload,
 		Headers: []kafka.Header{
 			{Key: "notification_id", Value: []byte(msg.NotificationID.String())},
