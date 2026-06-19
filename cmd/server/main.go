@@ -2,27 +2,26 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/rohit-bagade/notifyx/config"
+	"github.com/rohit-bagade/notifyx/internal/api/handlers"
+	"github.com/rohit-bagade/notifyx/internal/api/routes"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
 
 func main() {
-	// 1. Load configuration from environment / .env file.
 	cfg, err := config.Load()
 	if err != nil {
-		// We cannot use Zap yet because the logger hasn't been initialised.
-		// os.Exit(1) is the idiomatic way to bail out in main() before any
-		// deferred functions matter.
 		println("failed to load config:", err.Error())
 		os.Exit(1)
 	}
 
-	// 2. Initialise structured logger.
 	log, err := logger.New(cfg.Env)
 	if err != nil {
 		println("failed to init logger:", err.Error())
@@ -32,12 +31,10 @@ func main() {
 
 	log.Infow("starting Notifyx", "env", cfg.Env, "port", cfg.Port)
 
-	// 3. Run database migrations (applies any pending .up.sql files).
 	if err := postgres.RunMigrations(cfg.DatabaseURL, "migrations", log); err != nil {
 		log.Fatal("migration failed", "error", err)
 	}
 
-	// 4. Open PostgreSQL connection pool.
 	ctx := context.Background()
 	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL, log)
 	if err != nil {
@@ -45,13 +42,48 @@ func main() {
 	}
 	defer pool.Close()
 
-	log.Infow("Notifyx ready — waiting for shutdown signal")
+	// Build repositories.
+	tenantRepo := postgres.NewTenantRepository(pool)
+	apiKeyRepo := postgres.NewAPIKeyRepository(pool)
+	channelRepo := postgres.NewTenantChannelRepository(pool)
+	rateLimitRepo := postgres.NewTenantRateLimitRepository(pool)
 
-	// 5. Block until SIGINT or SIGTERM (Ctrl-C or docker stop).
-	// This will be replaced in Phase 2 when we start the HTTP server.
+	// Build handlers.
+	h := &routes.Handlers{
+		Health: handlers.NewHealthHandler(),
+		Tenant: handlers.NewTenantHandler(&handlers.TenantService{
+			Tenants:    tenantRepo,
+			APIKeys:    apiKeyRepo,
+			Channels:   channelRepo,
+			RateLimits: rateLimitRepo,
+		}, log),
+	}
+
+	// Wire up Echo with all routes.
+	e := routes.Setup(h, apiKeyRepo, log)
+
+	// Start HTTP server in a goroutine so we can listen for shutdown signals.
+	// A goroutine is a lightweight concurrent function — think of it as a background thread.
+	go func() {
+		if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
+			log.Fatal("server error", "error", err)
+		}
+	}()
+
+	log.Infow("Notifyx ready", "port", cfg.Port)
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Infow("shutdown signal received, exiting")
+	log.Infow("shutdown signal received, draining connections...")
+
+	// Give in-flight requests 10 seconds to complete before hard-stopping.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := e.Shutdown(shutdownCtx); err != nil {
+		log.Errorw("server shutdown error", "error", err)
+	}
+
+	log.Infow("Notifyx stopped")
 }
