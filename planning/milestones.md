@@ -104,4 +104,5 @@ Containerization and Render deployment.
 - [ ] docker-compose.yml (Go + PostgreSQL + Redis + Kafka + Grafana)
 - [ ] .env.example
 - [ ] Render deployment config (render.yaml)
+- [ ] Move `postgres.RunMigrations` out of `main()` into Render's Pre-Deploy Command (see decisions.md, "migrations-on-startup")
 - [ ] README with setup instructions
