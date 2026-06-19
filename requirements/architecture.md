@@ -138,39 +138,44 @@ WS     /ws/connect?tenantId=&userId=
 
 ```
 notifyx/
-├── cmd/server/              # entrypoint
-├── config/                  # env-based config
-├── internal/
-│   ├── api/
-│   │   ├── handlers/        # Echo route handlers
-│   │   ├── middleware/      # auth, logging, rate limit
-│   │   └── routes/          # server setup + route registration
-│   ├── websocket/           # Gorilla WS server + presence tracking
-│   ├── kafka/
-│   │   ├── producer/        # publish to Kafka topics
-│   │   └── consumers/       # per-channel consumers + DLQ consumer
-│   ├── scheduler/           # cron runner for scheduled notifications
-│   ├── channels/
-│   │   ├── email/           # Resend integration
-│   │   ├── push/            # Firebase FCM integration
-│   │   ├── sms/             # Fast2SMS integration
-│   │   └── inapp/           # WebSocket delivery
-│   ├── ratelimit/           # Redis sliding window
-│   ├── dedup/               # Redis idempotency
-│   ├── dlq/                 # DLQ consumer + storage
-│   ├── templates/           # template rendering
-│   ├── repository/
-│   │   └── postgres/        # all DB queries
-│   └── domain/              # shared types (Notification, Tenant, etc.)
-├── pkg/
-│   ├── logger/              # Zap setup
-│   └── telemetry/           # OTel + Prometheus
-├── migrations/              # versioned SQL migrations
+├── backend/                 # Go service (cd here before running Go commands)
+│   ├── cmd/server/          # entrypoint
+│   ├── config/              # env-based config
+│   ├── internal/
+│   │   ├── api/
+│   │   │   ├── handlers/    # Echo route handlers
+│   │   │   ├── middleware/  # auth, logging, rate limit
+│   │   │   └── routes/      # server setup + route registration
+│   │   ├── websocket/       # Gorilla WS server + presence tracking
+│   │   ├── kafka/
+│   │   │   ├── producer/    # publish to Kafka topics
+│   │   │   └── consumers/   # per-channel consumers + DLQ consumer
+│   │   ├── scheduler/       # cron runner for scheduled notifications
+│   │   ├── channels/
+│   │   │   ├── email/       # Resend integration
+│   │   │   ├── push/        # Firebase FCM integration
+│   │   │   ├── sms/         # Fast2SMS integration
+│   │   │   └── inapp/       # WebSocket delivery
+│   │   ├── ratelimit/       # Redis sliding window
+│   │   ├── dedup/           # Redis idempotency
+│   │   ├── dlq/             # DLQ consumer + storage
+│   │   ├── templates/       # template rendering
+│   │   ├── repository/
+│   │   │   └── postgres/    # all DB queries
+│   │   └── domain/          # shared types (Notification, Tenant, etc.)
+│   ├── pkg/
+│   │   ├── logger/          # Zap setup
+│   │   └── telemetry/       # OTel + Prometheus
+│   ├── migrations/          # versioned SQL migrations
+│   ├── go.mod
+│   └── Dockerfile
+├── frontend/
+│   └── flutter/             # Flutter Web frontend (Phase 12)
+├── docs/                    # project context docs
+├── planning/                # milestones, task breakdown, decisions
 ├── requirements/            # this folder
-├── flutter_dashboard/       # Flutter Web frontend
-├── docker-compose.yml
-├── Dockerfile
-└── go.mod
+├── skills/                  # reusable skill guides
+└── docker-compose.yml       # orchestrates all services (root-level)
 ```
 
 ## Flutter Dashboard Screens

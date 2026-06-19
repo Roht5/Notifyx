@@ -4,7 +4,7 @@
 
 Notifyx is a multi-tenant distributed notification service built as a portfolio project. It supports Email, Push, SMS, and In-app (WebSocket) channels via an event-driven pipeline using Kafka.
 
-**Current state: Planning complete. No code written yet. Ready to start Phase 1.**
+**Current state: Phase 1 (Foundation) and Phase 2 (Tenant & Auth) complete. Phase 3 (Kafka Infrastructure) is next.**
 
 ---
 
@@ -23,18 +23,30 @@ Notifyx is a multi-tenant distributed notification service built as a portfolio 
 
 ```
 Notifyx/
-├── HANDOFF.md               ← you are here
+├── docs/
+│   └── HANDOFF.md           ← you are here
+├── planning/
+│   ├── milestones.md        ← 13 phases with checkbox task lists
+│   ├── dev-order.md         ← why each phase comes in its order + dependency map
+│   ├── task-breakdown.md    ← detailed implementation tasks per phase (start here when coding)
+│   └── decisions.md         ← all decisions made and why
 ├── requirements/
 │   ├── overview.md          ← project goals
 │   ├── tech-stack.md        ← all tools and providers
 │   ├── functional-requirements.md
 │   ├── non-functional-requirements.md
 │   └── architecture.md      ← flows, schema, API routes, Kafka topics, Redis keys, folder structure
-└── planning/
-    ├── milestones.md        ← 13 phases with checkbox task lists
-    ├── dev-order.md         ← why each phase comes in its order + dependency map
-    ├── task-breakdown.md    ← detailed implementation tasks per phase (start here when coding)
-    └── decisions.md         ← all decisions made and why
+├── skills/                  ← reusable skill docs (read before starting any phase)
+├── backend/                 ← Go service (cd here before running Go commands)
+│   ├── cmd/server/          ← entrypoint
+│   ├── config/              ← env-based config
+│   ├── internal/            ← all application code
+│   ├── pkg/                 ← shared packages (logger, telemetry)
+│   ├── migrations/          ← versioned SQL migrations
+│   ├── go.mod
+│   └── .env.example
+└── frontend/
+    └── flutter/             ← Flutter Web dashboard (Phase 12)
 ```
 
 ---
@@ -112,9 +124,7 @@ Read autonomous-dev/SKILL.md → Loop: [feature-dev → code-review → commit] 
 
 ## Where to Start
 
-**Phase 1 — Foundation** (see `planning/task-breakdown.md` → Phase 1):
-1. Initialize Go module: `github.com/rohit-bagade/notifyx`
-2. Create folder structure per `requirements/architecture.md`
-3. Set up config, Zap logger, PostgreSQL connection, migration runner
-4. Write all 9 DB migrations
-5. Define domain models
+**Phase 3 — Kafka Infrastructure** (see `planning/task-breakdown.md` → Phase 3):
+- Phases 1 and 2 are complete — see `planning/milestones.md` for what's done.
+- All Go work happens inside `backend/` — run `cd backend` before any `go` commands.
+- Read `planning/task-breakdown.md` Phase 3 section before writing any Kafka code.

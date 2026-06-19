@@ -13,7 +13,7 @@ Use this skill after completing any phase or significant unit of work to create 
 ## Pre-commit checklist
 
 Before committing, verify:
-- [ ] Code compiles: `go build ./...`
+- [ ] Code compiles: `cd backend && go build ./...`
 - [ ] No hardcoded credentials or API keys
 - [ ] Zap logger used — no `fmt.Println`
 - [ ] Config values from `config/config.go` — nothing hardcoded
@@ -51,7 +51,7 @@ fix(ratelimit): correct sliding window expiry calculation for global cap
 
 1. `git status` — confirm only intended files are changed
 2. Stage specific files — never `git add .` blindly (avoid accidental `.env` commits)
-3. `go build ./...` — confirm it compiles
+3. `cd backend && go build ./...` — confirm it compiles
 4. Commit with message following format above
 5. Update `planning/milestones.md` checkboxes if not done yet
 

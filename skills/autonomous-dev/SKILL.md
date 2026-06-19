@@ -21,7 +21,7 @@ Each iteration:
 2. Use the **feature-dev skill** to implement it (phases 1–5)
 3. Use the **code-review skill** to check it (phase 6)
 4. Fix any issues found
-5. Run `go build ./...` — if it fails, fix before proceeding
+5. Run `cd backend && go build ./...` — if it fails, fix before proceeding
 6. Use the **commit skill** to commit
 7. Check the task off in `planning/milestones.md`
 8. Repeat

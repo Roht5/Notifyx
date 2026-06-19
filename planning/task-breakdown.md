@@ -256,7 +256,7 @@
 ## Phase 12 — Flutter Dashboard
 
 ### Setup
-- Flutter Web project in `flutter_dashboard/`
+- Flutter Web project in `frontend/flutter/`
 - Bloc + HTTP client + WebSocket client
 - API base URL from environment config
 
