@@ -64,6 +64,7 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 
 	notifications := api.Group("/notifications")
 	notifications.POST("/send", h.Notification.Send)
+	notifications.POST("/schedule", h.Notification.Schedule)
 	notifications.POST("/batch", h.Notification.Batch)
 	notifications.GET("/history", h.Notification.History)
 	notifications.GET("/:id", h.Notification.Get)

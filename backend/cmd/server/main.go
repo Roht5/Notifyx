@@ -23,6 +23,7 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/ratelimit"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	redisrepo "github.com/rohit-bagade/notifyx/internal/repository/redis"
+	"github.com/rohit-bagade/notifyx/internal/scheduler"
 	"github.com/rohit-bagade/notifyx/internal/ws"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 	goredis "github.com/redis/go-redis/v9"
@@ -31,6 +32,14 @@ import (
 // replayInterval is how often the rate-limit replayer re-checks queued_rate_limited
 // notifications to see if their tenant's window has cleared.
 const replayInterval = 15 * time.Second
+
+// scheduleInterval is how often the scheduler cron polls scheduled_notifications for
+// due-but-unfired rows (Phase 9 milestone: "every 30s").
+const scheduleInterval = 30 * time.Second
+
+// cleanupInterval is how often the daily cleanup cron deletes notifications past their
+// expires_at retention window.
+const cleanupInterval = 24 * time.Hour
 
 func main() {
 	cfg, err := config.Load()
@@ -68,6 +77,7 @@ func main() {
 	notificationRepo := postgres.NewNotificationRepository(pool)
 	deliveryRepo := postgres.NewNotificationDeliveryRepository(pool)
 	templateRepo := postgres.NewTemplateRepository(pool)
+	scheduledRepo := postgres.NewScheduledNotificationRepository(pool)
 
 	bgCtx, cancelBg := context.WithCancel(context.Background())
 	var bgWg sync.WaitGroup
@@ -136,6 +146,40 @@ func main() {
 		}()
 	}
 
+	// Scheduler cron — polls scheduled_notifications for due-but-unfired rows and publishes
+	// them. Also needs the real (possibly-nil) producer, so it's built after the Kafka
+	// block too. Always started (unlike the replayer, which only matters once Redis rate
+	// limiting is active) since scheduling doesn't depend on Redis.
+	sched := scheduler.New(scheduledRepo, notificationRepo, deliveryRepo, prod, log)
+	bgWg.Add(1)
+	go func() {
+		defer bgWg.Done()
+		sched.Run(bgCtx, scheduleInterval)
+	}()
+
+	// Daily cleanup cron — deletes notifications past their expires_at retention window.
+	bgWg.Add(1)
+	go func() {
+		defer bgWg.Done()
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-ticker.C:
+				n, err := notificationRepo.DeleteExpired(bgCtx, time.Now())
+				if err != nil {
+					log.Errorw("cleanup: delete expired notifications failed", "error", err)
+					continue
+				}
+				if n > 0 {
+					log.Infow("cleanup: deleted expired notifications", "count", n)
+				}
+			}
+		}
+	}()
+
 	// HTTP handlers and routes.
 	h := &routes.Handlers{
 		Health: handlers.NewHealthHandler(),
@@ -153,6 +197,7 @@ func main() {
 			Deliveries:    deliveryRepo,
 			Channels:      channelRepo,
 			Templates:     templateRepo,
+			Scheduled:     scheduledRepo,
 			Producer:      prod,
 			RateLimiter:   limiter,
 			Dedup:         deduplicator,

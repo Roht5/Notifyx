@@ -68,10 +68,10 @@ Template CRUD and rendering at send time.
 
 ## Phase 9 — Scheduler & Cleanup
 Scheduled notifications and 90-day history cleanup.
-- [ ] POST /api/v1/notifications/schedule
-- [ ] Cron runner (every 30s) — poll + publish due notifications
-- [ ] Mark scheduled_notifications.fired = true after publish
-- [ ] Daily cleanup cron — delete notifications where expires_at < now()
+- [x] POST /api/v1/notifications/schedule
+- [x] Cron runner (every 30s) — poll + publish due notifications
+- [x] Mark scheduled_notifications.fired = true after publish
+- [x] Daily cleanup cron — delete notifications where expires_at < now()
 
 ## Phase 10 — Analytics
 Per-tenant analytics API consumed by the Flutter dashboard.

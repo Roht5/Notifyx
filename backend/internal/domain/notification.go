@@ -70,6 +70,17 @@ type NotificationDelivery struct {
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
+// ScheduledNotification tracks a notification deferred to a future scheduled_at, polled
+// and published by the scheduler cron (Phase 9) once due. Fired is set true after publish
+// so the same row is never re-published on a later poll.
+type ScheduledNotification struct {
+	ID             uuid.UUID `json:"id"`
+	NotificationID uuid.UUID `json:"notification_id"`
+	ScheduledAt    time.Time `json:"scheduled_at"`
+	Fired          bool      `json:"fired"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 // DLQMessage represents a notification that exhausted all retry attempts.
 type DLQMessage struct {
 	ID             uuid.UUID `json:"id"`

@@ -34,6 +34,7 @@ type NotificationService struct {
 	Deliveries    *postgres.NotificationDeliveryRepository
 	Channels      *postgres.TenantChannelRepository
 	Templates     *postgres.TemplateRepository
+	Scheduled     *postgres.ScheduledNotificationRepository
 	Producer      *producer.Producer
 	RateLimiter   *ratelimit.Limiter
 	Dedup         *dedup.Deduplicator
@@ -90,6 +91,31 @@ func (r *sendNotificationRequest) Validate() error {
 type sendNotificationResponse struct {
 	NotificationID string        `json:"notification_id"`
 	Status         domain.Status `json:"status"`
+}
+
+type scheduleNotificationRequest struct {
+	sendNotificationRequest
+	ScheduledAt string `json:"scheduled_at"`
+}
+
+func (r *scheduleNotificationRequest) Validate() error {
+	if r.ScheduledAt == "" {
+		return errors.New("scheduled_at is required")
+	}
+	t, err := time.Parse(time.RFC3339, r.ScheduledAt)
+	if err != nil {
+		return errors.New("scheduled_at must be RFC3339 (e.g. 2026-06-01T00:00:00Z)")
+	}
+	if !t.After(time.Now()) {
+		return errors.New("scheduled_at must be in the future")
+	}
+	return r.sendNotificationRequest.Validate()
+}
+
+type scheduleNotificationResponse struct {
+	NotificationID string        `json:"notification_id"`
+	Status         domain.Status `json:"status"`
+	ScheduledAt    time.Time     `json:"scheduled_at"`
 }
 
 type batchRecipient struct {
@@ -280,6 +306,91 @@ func (h *NotificationHandler) Send(c echo.Context) error {
 		httpStatus = http.StatusOK
 	}
 	return c.JSON(httpStatus, sendNotificationResponse{NotificationID: notificationID, Status: status})
+}
+
+// Schedule POST /api/v1/notifications/schedule
+// Persists the notification with status=pending and scheduled_at set, but does NOT publish
+// to Kafka — that happens later, when the scheduler cron (main.go) finds the row due via
+// ScheduledNotificationRepository.GetDueUnfired and publishes it then.
+func (h *NotificationHandler) Schedule(c echo.Context) error {
+	tenant, err := RequireTenant(c)
+	if err != nil {
+		return err
+	}
+
+	var req scheduleNotificationRequest
+	if err := c.Bind(&req); err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid request body")
+	}
+	if err := req.Validate(); err != nil {
+		return errResponse(c, http.StatusUnprocessableEntity, err.Error())
+	}
+	scheduledAt, _ := time.Parse(time.RFC3339, req.ScheduledAt)
+
+	ctx := c.Request().Context()
+	channel := domain.Channel(req.Channel)
+
+	enabled, err := h.svc.Channels.IsEnabled(ctx, tenant.ID, channel)
+	if err != nil {
+		h.log.Errorw("check channel enabled failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to verify channel")
+	}
+	if !enabled {
+		return errResponse(c, http.StatusForbidden, fmt.Sprintf("channel %q is not enabled for this tenant", req.Channel))
+	}
+
+	priority := domain.Priority(req.Priority)
+	if priority == "" {
+		priority = domain.PriorityNormal
+	}
+
+	var templateID *uuid.UUID
+	subject, body := req.Subject, req.Body
+	if req.TemplateID != "" {
+		var errMsg string
+		var httpStatus int
+		templateID, subject, body, errMsg, httpStatus = h.resolveTemplate(ctx, tenant.ID, req.TemplateID, channel, req.Variables)
+		if errMsg != "" {
+			return errResponse(c, httpStatus, errMsg)
+		}
+	}
+
+	params := postgres.CreateNotificationParams{
+		ID:             uuid.New(),
+		TenantID:       tenant.ID,
+		Channel:        channel,
+		Priority:       priority,
+		Status:         domain.StatusPending,
+		RecipientID:    req.RecipientID,
+		RecipientEmail: req.RecipientEmail,
+		RecipientPhone: req.RecipientPhone,
+		RecipientToken: req.RecipientToken,
+		TemplateID:     templateID,
+		Subject:        subject,
+		Body:           body,
+		Metadata:       req.Metadata,
+		IdempotencyKey: req.IdempotencyKey,
+		ScheduledAt:    &scheduledAt,
+	}
+
+	// publish=false — createAndQueue still persists the notification + delivery row inside
+	// one transaction, it just skips the Kafka publish step that immediate sends use.
+	notification, _, err := h.createAndQueue(ctx, params, false)
+	if err != nil {
+		h.log.Errorw("create scheduled notification failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to schedule notification")
+	}
+
+	if _, err := h.svc.Scheduled.Create(ctx, notification.ID, scheduledAt); err != nil {
+		h.log.Errorw("create scheduled_notifications row failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to schedule notification")
+	}
+
+	return c.JSON(http.StatusCreated, scheduleNotificationResponse{
+		NotificationID: notification.ID.String(),
+		Status:         notification.Status,
+		ScheduledAt:    scheduledAt,
+	})
 }
 
 // Batch POST /api/v1/notifications/batch
