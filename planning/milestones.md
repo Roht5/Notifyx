@@ -61,10 +61,10 @@ Real-time in-app delivery with presence and offline support.
 
 ## Phase 8 — Templates
 Template CRUD and rendering at send time.
-- [ ] POST/GET/PUT/DELETE /api/v1/templates
-- [ ] Template storage in PostgreSQL
-- [ ] Template rendering engine ({{variable}} substitution)
-- [ ] Wire template rendering into all channel consumers
+- [x] POST/GET/PUT/DELETE /api/v1/templates
+- [x] Template storage in PostgreSQL
+- [x] Template rendering engine ({{variable}} substitution)
+- [x] Wire template rendering into all channel consumers (rendered once at send time, before publish — see decisions.md)
 
 ## Phase 9 — Scheduler & Cleanup
 Scheduled notifications and 90-day history cleanup.

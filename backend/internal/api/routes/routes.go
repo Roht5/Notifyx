@@ -15,6 +15,7 @@ type Handlers struct {
 	Tenant       *handlers.TenantHandler
 	Health       *handlers.HealthHandler
 	Notification *handlers.NotificationHandler
+	Template     *handlers.TemplateHandler
 	WS           *ws.Handler
 }
 
@@ -66,6 +67,13 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	notifications.POST("/batch", h.Notification.Batch)
 	notifications.GET("/history", h.Notification.History)
 	notifications.GET("/:id", h.Notification.Get)
+
+	templates := api.Group("/templates")
+	templates.POST("", h.Template.Create)
+	templates.GET("", h.Template.List)
+	templates.GET("/:id", h.Template.Get)
+	templates.PUT("/:id", h.Template.Update)
+	templates.DELETE("/:id", h.Template.Delete)
 
 	return e
 }

@@ -67,6 +67,7 @@ func main() {
 	dlqRepo := postgres.NewDLQRepository(pool)
 	notificationRepo := postgres.NewNotificationRepository(pool)
 	deliveryRepo := postgres.NewNotificationDeliveryRepository(pool)
+	templateRepo := postgres.NewTemplateRepository(pool)
 
 	bgCtx, cancelBg := context.WithCancel(context.Background())
 	var bgWg sync.WaitGroup
@@ -151,10 +152,14 @@ func main() {
 			Notifications: notificationRepo,
 			Deliveries:    deliveryRepo,
 			Channels:      channelRepo,
+			Templates:     templateRepo,
 			Producer:      prod,
 			RateLimiter:   limiter,
 			Dedup:         deduplicator,
 			Pool:          pool,
+		}, log),
+		Template: handlers.NewTemplateHandler(&handlers.TemplateService{
+			Templates: templateRepo,
 		}, log),
 	}
 	e := routes.Setup(h, apiKeyRepo, log)

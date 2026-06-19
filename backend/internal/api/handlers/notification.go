@@ -18,6 +18,7 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
 	"github.com/rohit-bagade/notifyx/internal/ratelimit"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
+	tmplrender "github.com/rohit-bagade/notifyx/internal/template"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
 
@@ -32,6 +33,7 @@ type NotificationService struct {
 	Notifications *postgres.NotificationRepository
 	Deliveries    *postgres.NotificationDeliveryRepository
 	Channels      *postgres.TenantChannelRepository
+	Templates     *postgres.TemplateRepository
 	Producer      *producer.Producer
 	RateLimiter   *ratelimit.Limiter
 	Dedup         *dedup.Deduplicator
@@ -51,16 +53,18 @@ func NewNotificationHandler(svc *NotificationService, log *logger.Logger) *Notif
 // --- request / response types ---
 
 type sendNotificationRequest struct {
-	Channel        string         `json:"channel"`
-	Priority       string         `json:"priority,omitempty"`
-	RecipientID    string         `json:"recipient_id,omitempty"`
-	RecipientEmail string         `json:"recipient_email,omitempty"`
-	RecipientPhone string         `json:"recipient_phone,omitempty"`
-	RecipientToken string         `json:"recipient_token,omitempty"`
-	Subject        string         `json:"subject,omitempty"`
-	Body           string         `json:"body"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	Channel        string            `json:"channel"`
+	Priority       string            `json:"priority,omitempty"`
+	RecipientID    string            `json:"recipient_id,omitempty"`
+	RecipientEmail string            `json:"recipient_email,omitempty"`
+	RecipientPhone string            `json:"recipient_phone,omitempty"`
+	RecipientToken string            `json:"recipient_token,omitempty"`
+	TemplateID     string            `json:"template_id,omitempty"`
+	Variables      map[string]string `json:"variables,omitempty"`
+	Subject        string            `json:"subject,omitempty"`
+	Body           string            `json:"body"`
+	Metadata       map[string]any    `json:"metadata,omitempty"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
 }
 
 func (r *sendNotificationRequest) Validate() error {
@@ -69,6 +73,13 @@ func (r *sendNotificationRequest) Validate() error {
 	}
 	if r.Priority != "" && !isValidPriority(r.Priority) {
 		return fmt.Errorf("invalid priority %q: must be one of critical, high, normal, low", r.Priority)
+	}
+	// When a template is supplied, subject/body come from the template at send time —
+	// see NotificationHandler.resolveTemplate — so they're not required up front (the
+	// email-subject check inside validateRecipientFields is skipped too, since the
+	// template's own subject is validated when the template is created).
+	if r.TemplateID != "" {
+		return validateRecipientFields(domain.Channel(r.Channel), r.RecipientEmail, r.RecipientPhone, r.RecipientToken, r.RecipientID, "ignored-by-template")
 	}
 	if r.Body == "" {
 		return errors.New("body is required")
@@ -89,13 +100,15 @@ type batchRecipient struct {
 }
 
 type batchSendRequest struct {
-	Channel        string           `json:"channel"`
-	Priority       string           `json:"priority,omitempty"`
-	Subject        string           `json:"subject,omitempty"`
-	Body           string           `json:"body"`
-	Metadata       map[string]any   `json:"metadata,omitempty"`
-	Recipients     []batchRecipient `json:"recipients"`
-	IdempotencyKey string           `json:"idempotency_key,omitempty"`
+	Channel        string            `json:"channel"`
+	Priority       string            `json:"priority,omitempty"`
+	TemplateID     string            `json:"template_id,omitempty"`
+	Variables      map[string]string `json:"variables,omitempty"`
+	Subject        string            `json:"subject,omitempty"`
+	Body           string            `json:"body"`
+	Metadata       map[string]any    `json:"metadata,omitempty"`
+	Recipients     []batchRecipient  `json:"recipients"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
 }
 
 func (r *batchSendRequest) Validate() error {
@@ -105,15 +118,19 @@ func (r *batchSendRequest) Validate() error {
 	if r.Priority != "" && !isValidPriority(r.Priority) {
 		return fmt.Errorf("invalid priority %q: must be one of critical, high, normal, low", r.Priority)
 	}
-	if r.Body == "" {
+	if r.TemplateID == "" && r.Body == "" {
 		return errors.New("body is required")
 	}
 	if len(r.Recipients) == 0 {
 		return errors.New("recipients must not be empty")
 	}
 	channel := domain.Channel(r.Channel)
+	subject := r.Subject
+	if r.TemplateID != "" {
+		subject = "ignored-by-template"
+	}
 	for i, rec := range r.Recipients {
-		if err := validateRecipientFields(channel, rec.RecipientEmail, rec.RecipientPhone, rec.RecipientToken, rec.RecipientID, r.Subject); err != nil {
+		if err := validateRecipientFields(channel, rec.RecipientEmail, rec.RecipientPhone, rec.RecipientToken, rec.RecipientID, subject); err != nil {
 			return fmt.Errorf("recipient %d: %w", i, err)
 		}
 	}
@@ -229,6 +246,17 @@ func (h *NotificationHandler) Send(c echo.Context) error {
 		priority = domain.PriorityNormal
 	}
 
+	var templateID *uuid.UUID
+	subject, body := req.Subject, req.Body
+	if req.TemplateID != "" {
+		var errMsg string
+		var httpStatus int
+		templateID, subject, body, errMsg, httpStatus = h.resolveTemplate(ctx, tenant.ID, req.TemplateID, channel, req.Variables)
+		if errMsg != "" {
+			return errResponse(c, httpStatus, errMsg)
+		}
+	}
+
 	notificationID, status, duplicate, errMsg := h.processSend(ctx, req.IdempotencyKey, postgres.CreateNotificationParams{
 		ID:             uuid.New(),
 		TenantID:       tenant.ID,
@@ -238,8 +266,9 @@ func (h *NotificationHandler) Send(c echo.Context) error {
 		RecipientEmail: req.RecipientEmail,
 		RecipientPhone: req.RecipientPhone,
 		RecipientToken: req.RecipientToken,
-		Subject:        req.Subject,
-		Body:           req.Body,
+		TemplateID:     templateID,
+		Subject:        subject,
+		Body:           body,
 		Metadata:       req.Metadata,
 	})
 	if errMsg != "" {
@@ -285,6 +314,17 @@ func (h *NotificationHandler) Batch(c echo.Context) error {
 		priority = domain.PriorityNormal
 	}
 
+	var templateID *uuid.UUID
+	subject, body := req.Subject, req.Body
+	if req.TemplateID != "" {
+		var errMsg string
+		var httpStatus int
+		templateID, subject, body, errMsg, httpStatus = h.resolveTemplate(ctx, tenant.ID, req.TemplateID, channel, req.Variables)
+		if errMsg != "" {
+			return errResponse(c, httpStatus, errMsg)
+		}
+	}
+
 	// Recipients are processed with bounded concurrency instead of one at a time — a
 	// purely sequential loop blocks the request goroutine for the full batch (100+
 	// sequential Postgres writes / Redis round trips / Kafka publishes) and gives no
@@ -320,8 +360,9 @@ func (h *NotificationHandler) Batch(c echo.Context) error {
 				RecipientEmail: rec.RecipientEmail,
 				RecipientPhone: rec.RecipientPhone,
 				RecipientToken: rec.RecipientToken,
-				Subject:        req.Subject,
-				Body:           req.Body,
+				TemplateID:     templateID,
+				Subject:        subject,
+				Body:           body,
 				Metadata:       req.Metadata,
 			})
 			if errMsg != "" {
@@ -430,6 +471,31 @@ func (h *NotificationHandler) Get(c echo.Context) error {
 		Notification: notification,
 		Deliveries:   deliveries,
 	})
+}
+
+// resolveTemplate loads templateIDStr (a UUID string from the request) scoped to tenantID,
+// renders its subject/body against vars, and returns the resolved id/subject/body. Returns
+// a non-empty errMsg (already safe to surface to the client) and matching httpStatus on
+// failure — bad id format, not found, or a channel mismatch with the request's channel.
+func (h *NotificationHandler) resolveTemplate(ctx context.Context, tenantID uuid.UUID, templateIDStr string, channel domain.Channel, vars map[string]string) (templateID *uuid.UUID, subject, body string, errMsg string, httpStatus int) {
+	id, err := uuid.Parse(templateIDStr)
+	if err != nil {
+		return nil, "", "", "invalid template_id", http.StatusBadRequest
+	}
+
+	t, err := h.svc.Templates.GetByID(ctx, tenantID, id)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, "", "", "template not found", http.StatusNotFound
+		}
+		h.log.Errorw("resolve template failed", "error", err)
+		return nil, "", "", "failed to resolve template", http.StatusInternalServerError
+	}
+	if t.Channel != channel {
+		return nil, "", "", fmt.Sprintf("template channel %q does not match request channel %q", t.Channel, channel), http.StatusUnprocessableEntity
+	}
+
+	return &t.ID, tmplrender.Render(t.Subject, vars), tmplrender.Render(t.Body, vars), "", 0
 }
 
 // processSend runs the full per-notification pipeline shared by Send and Batch: dedup
