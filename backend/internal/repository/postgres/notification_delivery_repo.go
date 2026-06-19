@@ -5,16 +5,17 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
 // NotificationDeliveryRepository handles all DB operations for the notification_deliveries table.
+// pool is an Executor (not *pgxpool.Pool directly) so the same repository type
+// can also be constructed against a transaction — see WithTx in db.go.
 type NotificationDeliveryRepository struct {
-	pool *pgxpool.Pool
+	pool Executor
 }
 
-func NewNotificationDeliveryRepository(pool *pgxpool.Pool) *NotificationDeliveryRepository {
+func NewNotificationDeliveryRepository(pool Executor) *NotificationDeliveryRepository {
 	return &NotificationDeliveryRepository{pool: pool}
 }
 

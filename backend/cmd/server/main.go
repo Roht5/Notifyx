@@ -130,6 +130,7 @@ func main() {
 			Producer:      prod,
 			RateLimiter:   limiter,
 			Dedup:         deduplicator,
+			Pool:          pool,
 		}, log),
 	}
 	e := routes.Setup(h, apiKeyRepo, log)

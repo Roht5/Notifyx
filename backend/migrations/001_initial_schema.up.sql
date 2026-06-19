@@ -86,6 +86,10 @@ CREATE INDEX IF NOT EXISTS idx_notifications_status     ON notifications(status)
 CREATE INDEX IF NOT EXISTS idx_notifications_channel    ON notifications(channel);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_expires_at ON notifications(expires_at);
+-- GetByTenantID (notification history) filters by tenant_id and orders by created_at
+-- DESC for pagination — this composite lets Postgres satisfy both from one index scan
+-- instead of scanning idx_notifications_tenant_id and filesorting the result.
+CREATE INDEX IF NOT EXISTS idx_notifications_tenant_created_at ON notifications(tenant_id, created_at DESC);
 -- No separate index on idempotency_key: dedup is Redis-based (SETNX), nothing queries
 -- Postgres by idempotency_key alone, and the composite UNIQUE above already covers every
 -- tenant-scoped lookup we actually do.
