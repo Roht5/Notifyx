@@ -1,0 +1,2 @@
+ALTER TABLE notifications DROP CONSTRAINT notifications_tenant_idempotency_key_key;
+ALTER TABLE notifications ADD CONSTRAINT notifications_idempotency_key_key UNIQUE (idempotency_key);
