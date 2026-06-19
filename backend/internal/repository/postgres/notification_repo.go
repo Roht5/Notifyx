@@ -126,6 +126,9 @@ func (r *NotificationRepository) GetByTenantID(ctx context.Context, tenantID uui
 		}
 		notifications = append(notifications, n)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate notifications: %w", err)
+	}
 	return notifications, total, nil
 }
 
@@ -150,6 +153,9 @@ func (r *NotificationRepository) GetByStatus(ctx context.Context, status domain.
 			return nil, fmt.Errorf("scan notification: %w", err)
 		}
 		notifications = append(notifications, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate notifications: %w", err)
 	}
 	return notifications, nil
 }

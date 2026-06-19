@@ -5,15 +5,14 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
 type TenantRateLimitRepository struct {
-	pool *pgxpool.Pool
+	pool Executor
 }
 
-func NewTenantRateLimitRepository(pool *pgxpool.Pool) *TenantRateLimitRepository {
+func NewTenantRateLimitRepository(pool Executor) *TenantRateLimitRepository {
 	return &TenantRateLimitRepository{pool: pool}
 }
 
@@ -51,6 +50,9 @@ func (r *TenantRateLimitRepository) GetByTenantID(ctx context.Context, tenantID 
 		}
 		rl.Channel = domain.Channel(ch)
 		limits = append(limits, &rl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rate limits: %w", err)
 	}
 	return limits, nil
 }

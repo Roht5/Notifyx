@@ -6,16 +6,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
 // TenantRepository handles all DB operations for the tenants table.
+// pool is an Executor (not *pgxpool.Pool directly) so the same repository type
+// can also be constructed against a transaction — see WithTx in db.go.
 type TenantRepository struct {
-	pool *pgxpool.Pool
+	pool Executor
 }
 
-func NewTenantRepository(pool *pgxpool.Pool) *TenantRepository {
+func NewTenantRepository(pool Executor) *TenantRepository {
 	return &TenantRepository{pool: pool}
 }
 
@@ -65,6 +66,9 @@ func (r *TenantRepository) GetAll(ctx context.Context) ([]*domain.Tenant, error)
 			return nil, fmt.Errorf("scan tenant: %w", err)
 		}
 		tenants = append(tenants, &t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenants: %w", err)
 	}
 	return tenants, nil
 }

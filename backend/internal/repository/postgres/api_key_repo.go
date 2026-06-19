@@ -6,16 +6,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
 // APIKeyRepository handles storage and lookup of hashed API keys.
 type APIKeyRepository struct {
-	pool *pgxpool.Pool
+	pool Executor
 }
 
-func NewAPIKeyRepository(pool *pgxpool.Pool) *APIKeyRepository {
+func NewAPIKeyRepository(pool Executor) *APIKeyRepository {
 	return &APIKeyRepository{pool: pool}
 }
 
@@ -69,6 +68,9 @@ func (r *APIKeyRepository) GetByTenantID(ctx context.Context, tenantID uuid.UUID
 			return nil, fmt.Errorf("scan api key: %w", err)
 		}
 		keys = append(keys, &k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate api keys: %w", err)
 	}
 	return keys, nil
 }

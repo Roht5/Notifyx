@@ -5,15 +5,14 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
 type TenantChannelRepository struct {
-	pool *pgxpool.Pool
+	pool Executor
 }
 
-func NewTenantChannelRepository(pool *pgxpool.Pool) *TenantChannelRepository {
+func NewTenantChannelRepository(pool Executor) *TenantChannelRepository {
 	return &TenantChannelRepository{pool: pool}
 }
 
@@ -52,6 +51,9 @@ func (r *TenantChannelRepository) GetByTenantID(ctx context.Context, tenantID uu
 		}
 		tc.Channel = domain.Channel(ch)
 		channels = append(channels, &tc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tenant channels: %w", err)
 	}
 	return channels, nil
 }

@@ -103,5 +103,8 @@ func (r *NotificationDeliveryRepository) GetByNotificationID(ctx context.Context
 		}
 		deliveries = append(deliveries, &d)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate notification deliveries: %w", err)
+	}
 	return deliveries, nil
 }

@@ -4,9 +4,37 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
+
+// Executor is the subset of *pgxpool.Pool and pgx.Tx that repositories need.
+// Repositories are constructed against this interface instead of *pgxpool.Pool
+// directly so the same repository type can run either against the pool (normal
+// path) or against a transaction (when a handler needs several repository calls
+// to commit or roll back together) without duplicating query code.
+type Executor interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// WithTx begins a transaction on pool, runs fn against it, and commits on success
+// or rolls back if fn returns an error (or panics).
+func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) // no-op if Commit already succeeded
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
 // NewPool creates and validates a pgxpool connection pool.
 //
