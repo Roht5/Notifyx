@@ -30,6 +30,9 @@ confluent-kafka-go requires librdkafka (a CGO/C library) which wasn't available 
 **Rate limit check in the handler/service layer, not as Echo middleware (deviation from task-breakdown wording)**
 A generic middleware can only allow or reject a request — it can't decide to persist a rate-limited notification as `queued_rate_limited` and skip publishing instead of erroring, since that requires writing to Postgres before the handler's business logic even runs. The check lives in `NotificationHandler.processSend` instead, with the same nil-checked degrade-gracefully pattern used for the Kafka producer.
 
+**Single `001_initial_schema` migration, not one file per table (deviation from task-breakdown wording, by request)**
+The original plan called for 9 separate per-table migrations; two more (010, 011) got bolted on later fixing bugs found in review (missing `updated_at` on templates, a global instead of per-tenant unique constraint on `idempotency_key`). Since none of these had ever run against a real database — no deployment, no `.env`, nothing — there was no "already shipped, never edit a migration" constraint to respect, so all 11 files were consolidated into one `001_initial_schema.up/down.sql` with both fixes baked in from the start. Verified locally: spun up Postgres via Homebrew, ran the real `golang-migrate` up → down → up round-trip against a scratch database, confirmed the schema (including the per-tenant unique constraint and the `updated_at` column) and a clean drop, then tore the scratch DB and service back down.
+
 ---
 
 ## Channels

@@ -16,16 +16,7 @@
 ### Database
 - PostgreSQL connection pool in `internal/repository/postgres/`
 - Migration runner (use `golang-migrate`)
-- Migrations (one file per table, numbered):
-  - `001_create_tenants.sql`
-  - `002_create_tenant_channels.sql`
-  - `003_create_tenant_rate_limits.sql`
-  - `004_create_api_keys.sql`
-  - `005_create_notification_templates.sql`
-  - `006_create_notifications.sql`
-  - `007_create_notification_deliveries.sql`
-  - `008_create_scheduled_notifications.sql`
-  - `009_create_dlq_messages.sql`
+- Single `001_initial_schema.sql` (up/down) covering all 9 tables — see decisions.md for why this isn't one-file-per-table
 
 ### Domain Models
 - `internal/domain/notification.go` — Notification, NotificationDelivery, DLQMessage, Channel, Status, Priority enums

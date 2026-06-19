@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS dlq_messages CASCADE;
+DROP TABLE IF EXISTS scheduled_notifications CASCADE;
+DROP TABLE IF EXISTS notification_deliveries CASCADE;
+DROP TABLE IF EXISTS notifications CASCADE;
+DROP TABLE IF EXISTS notification_templates CASCADE;
+DROP TABLE IF EXISTS api_keys CASCADE;
+DROP TABLE IF EXISTS tenant_rate_limits CASCADE;
+DROP TABLE IF EXISTS tenant_channels CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
