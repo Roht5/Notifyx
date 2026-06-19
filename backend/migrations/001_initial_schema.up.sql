@@ -1,3 +1,9 @@
+-- gen_random_uuid() is built into pg_catalog on PostgreSQL 13+ (Render's free tier is
+-- well past that). This extension is just insurance for an older local Postgres —
+-- pgcrypto's own gen_random_uuid() never shadows the built-in one since pg_catalog is
+-- implicitly searched first.
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 CREATE TABLE IF NOT EXISTS tenants (
     id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name       TEXT        NOT NULL,
@@ -35,7 +41,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_tenant_id ON api_keys(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash  ON api_keys(key_hash);
+-- No separate index on key_hash: the inline UNIQUE constraint above already created one.
 
 CREATE TABLE IF NOT EXISTS notification_templates (
     id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -72,12 +78,14 @@ CREATE TABLE IF NOT EXISTS notifications (
     CONSTRAINT notifications_tenant_idempotency_key_key UNIQUE (tenant_id, idempotency_key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_notifications_tenant_id       ON notifications(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_status          ON notifications(status);
-CREATE INDEX IF NOT EXISTS idx_notifications_channel         ON notifications(channel);
-CREATE INDEX IF NOT EXISTS idx_notifications_created_at      ON notifications(created_at);
-CREATE INDEX IF NOT EXISTS idx_notifications_expires_at      ON notifications(expires_at);
-CREATE INDEX IF NOT EXISTS idx_notifications_idempotency_key ON notifications(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_notifications_tenant_id  ON notifications(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_status     ON notifications(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_channel    ON notifications(channel);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_expires_at ON notifications(expires_at);
+-- No separate index on idempotency_key: dedup is Redis-based (SETNX), nothing queries
+-- Postgres by idempotency_key alone, and the composite UNIQUE above already covers every
+-- tenant-scoped lookup we actually do.
 
 CREATE TABLE IF NOT EXISTS notification_deliveries (
     id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
