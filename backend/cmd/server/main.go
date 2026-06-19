@@ -121,6 +121,7 @@ func main() {
 			Channels:             channelRepo,
 			RateLimits:           rateLimitRepo,
 			DefaultGlobalRateCap: cfg.DefaultGlobalCap,
+			Pool:                 pool,
 		}, log),
 		Notification: handlers.NewNotificationHandler(&handlers.NotificationService{
 			Notifications: notificationRepo,

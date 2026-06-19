@@ -25,6 +25,13 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	e.Use(echomw.RequestID())            // adds X-Request-ID header
 	e.Use(middleware.RequestLogger(log)) // structured Zap request logging
 	e.Use(echomw.Recover())              // recover from panics, return 500
+	// CORS — needed once the Flutter Web dashboard (Phase 12) calls this API from a
+	// different origin. AllowOrigins is "*" for now since the dashboard is unauthenticated
+	// (see decisions.md); tighten to the deployed dashboard origin once one exists.
+	e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, "X-API-Key"},
+	}))
 
 	authMW := middleware.Auth(apiKeyRepo, log)
 
@@ -40,6 +47,9 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	tenants.DELETE("/:id", h.Tenant.Delete)
 	tenants.PUT("/:id/channels", h.Tenant.UpdateChannels)
 	tenants.PUT("/:id/rate-limits", h.Tenant.UpdateRateLimits)
+	tenants.POST("/:id/keys", h.Tenant.CreateKey)
+	tenants.GET("/:id/keys", h.Tenant.ListKeys)
+	tenants.DELETE("/:id/keys/:key_id", h.Tenant.DeleteKey)
 
 	// Authenticated API — all routes below require X-API-Key.
 	api := e.Group("/api/v1", authMW)
