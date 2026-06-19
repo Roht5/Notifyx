@@ -193,7 +193,10 @@ func validateRecipientFields(channel domain.Channel, email, phone, token, recipi
 
 // Send POST /api/v1/notifications/send
 func (h *NotificationHandler) Send(c echo.Context) error {
-	tenant := TenantFromContext(c)
+	tenant, err := RequireTenant(c)
+	if err != nil {
+		return err
+	}
 
 	var req sendNotificationRequest
 	if err := c.Bind(&req); err != nil {
@@ -246,7 +249,10 @@ func (h *NotificationHandler) Send(c echo.Context) error {
 
 // Batch POST /api/v1/notifications/batch
 func (h *NotificationHandler) Batch(c echo.Context) error {
-	tenant := TenantFromContext(c)
+	tenant, err := RequireTenant(c)
+	if err != nil {
+		return err
+	}
 
 	var req batchSendRequest
 	if err := c.Bind(&req); err != nil {
@@ -308,7 +314,10 @@ func (h *NotificationHandler) Batch(c echo.Context) error {
 
 // History GET /api/v1/notifications/history
 func (h *NotificationHandler) History(c echo.Context) error {
-	tenant := TenantFromContext(c)
+	tenant, err := RequireTenant(c)
+	if err != nil {
+		return err
+	}
 
 	var q historyQueryParams
 	if err := c.Bind(&q); err != nil {
@@ -362,7 +371,10 @@ func (h *NotificationHandler) History(c echo.Context) error {
 
 // Get GET /api/v1/notifications/:id
 func (h *NotificationHandler) Get(c echo.Context) error {
-	tenant := TenantFromContext(c)
+	tenant, err := RequireTenant(c)
+	if err != nil {
+		return err
+	}
 
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

@@ -19,9 +19,23 @@ func errResponse(c echo.Context, status int, message string) error {
 }
 
 // TenantFromContext retrieves the authenticated tenant injected by the auth middleware.
-// Panics if called on a route that doesn't use auth middleware — that's a programming error.
+// Returns nil if called on a route that doesn't use auth middleware — that's a
+// programming error, but one nil check is cheaper than a recovered panic and a 500
+// with no useful context in the logs.
 func TenantFromContext(c echo.Context) *domain.Tenant {
-	return c.Get("tenant").(*domain.Tenant)
+	tenant, _ := c.Get("tenant").(*domain.Tenant)
+	return tenant
+}
+
+// RequireTenant fetches the authenticated tenant from context, writing a 500 response
+// and returning an error if it's missing (a route registered without the auth
+// middleware — a programming error, but one that should fail cleanly, not panic).
+func RequireTenant(c echo.Context) (*domain.Tenant, error) {
+	tenant := TenantFromContext(c)
+	if tenant == nil {
+		return nil, errResponse(c, http.StatusInternalServerError, "internal error: missing tenant context")
+	}
+	return tenant, nil
 }
 
 // PaginationParams are shared across all list endpoints.
