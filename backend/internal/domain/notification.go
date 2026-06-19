@@ -39,35 +39,35 @@ const (
 
 // Notification is the central entity — one row in the notifications table.
 type Notification struct {
-	ID             uuid.UUID
-	TenantID       uuid.UUID
-	Channel        Channel
-	Priority       Priority
-	Status         Status
-	RecipientID    string
-	RecipientEmail string
-	RecipientPhone string
-	RecipientToken string
-	TemplateID     *uuid.UUID // nullable — nil when no template used
-	Subject        string
-	Body           string
-	Metadata       map[string]any
-	IdempotencyKey string
-	ScheduledAt    *time.Time // nullable — nil for immediate sends
-	CreatedAt      time.Time
-	ExpiresAt      time.Time
+	ID             uuid.UUID      `json:"id"`
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	Channel        Channel        `json:"channel"`
+	Priority       Priority       `json:"priority"`
+	Status         Status         `json:"status"`
+	RecipientID    string         `json:"recipient_id,omitempty"`
+	RecipientEmail string         `json:"recipient_email,omitempty"`
+	RecipientPhone string         `json:"recipient_phone,omitempty"`
+	RecipientToken string         `json:"recipient_token,omitempty"`
+	TemplateID     *uuid.UUID     `json:"template_id,omitempty"` // nullable — nil when no template used
+	Subject        string         `json:"subject,omitempty"`
+	Body           string         `json:"body"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	ScheduledAt    *time.Time     `json:"scheduled_at,omitempty"` // nullable — nil for immediate sends
+	CreatedAt      time.Time      `json:"created_at"`
+	ExpiresAt      time.Time      `json:"expires_at"`
 }
 
 // NotificationDelivery tracks each delivery attempt for a notification.
 type NotificationDelivery struct {
-	ID             uuid.UUID
-	NotificationID uuid.UUID
-	Channel        Channel
-	Status         Status
-	Attempts       int
-	ErrorMessage   string
-	DeliveredAt    *time.Time // nil until successfully delivered
-	CreatedAt      time.Time
+	ID             uuid.UUID  `json:"id"`
+	NotificationID uuid.UUID  `json:"notification_id"`
+	Channel        Channel    `json:"channel"`
+	Status         Status     `json:"status"`
+	Attempts       int        `json:"attempts"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	DeliveredAt    *time.Time `json:"delivered_at,omitempty"` // nil until successfully delivered
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // DLQMessage represents a notification that exhausted all retry attempts.
