@@ -28,12 +28,12 @@ Producer and consumer scaffolding before any channel is wired up.
 
 ## Phase 4 — Notification Core
 Send, batch, history, and delivery tracking — without channel providers yet (stub delivery).
-- [ ] POST /api/v1/notifications/send
-- [ ] POST /api/v1/notifications/batch
-- [ ] GET /api/v1/notifications/history
-- [ ] GET /api/v1/notifications/:id
-- [ ] Notification + delivery persistence in PostgreSQL
-- [ ] Priority ordering in Kafka messages
+- [x] POST /api/v1/notifications/send
+- [x] POST /api/v1/notifications/batch
+- [x] GET /api/v1/notifications/history
+- [x] GET /api/v1/notifications/:id
+- [x] Notification + delivery persistence in PostgreSQL
+- [x] Priority ordering in Kafka messages (carried as the partition key, set in Phase 3)
 
 ## Phase 5 — Rate Limiting & Deduplication
 Redis-based safeguards applied to the send pipeline.
