@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 
@@ -11,11 +12,14 @@ import (
 // Values are read at startup; the app fails fast if required values are missing.
 type Config struct {
 	// Server
-	Port string
-	Env  string // "development" | "production"
+	Port     string
+	Env      string // "development" | "production"
+	LogLevel string // optional: debug|info|warn|error — overrides Env's default verbosity
 
 	// PostgreSQL
 	DatabaseURL string
+	DBMaxConns  int // explicit cap — free-tier Postgres plans cap total connections low
+	DBMinConns  int
 
 	// Redis (Upstash)
 	RedisURL string
@@ -48,7 +52,10 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Port:                    getEnv("PORT", "8080"),
 		Env:                     getEnv("APP_ENV", "development"),
+		LogLevel:                getEnv("LOG_LEVEL", ""),
 		DatabaseURL:             getEnv("DATABASE_URL", ""),
+		DBMaxConns:              getEnvInt("DB_MAX_CONNS", 10),
+		DBMinConns:              getEnvInt("DB_MIN_CONNS", 0),
 		RedisURL:                getEnv("REDIS_URL", ""),
 		KafkaBootstrapServers:   getEnv("KAFKA_BOOTSTRAP_SERVERS", ""),
 		KafkaAPIKey:             getEnv("KAFKA_API_KEY", ""),
@@ -60,7 +67,28 @@ func Load() (*Config, error) {
 		DefaultGlobalCap:        getEnvInt("DEFAULT_GLOBAL_CAP", 300),
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
 	return cfg, nil
+}
+
+// Validate fails fast on missing or nonsensical config instead of letting the app start
+// and crash later with a more confusing error deep inside pool init or migrations.
+func (c *Config) Validate() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	if c.Env != "development" && c.Env != "production" {
+		return fmt.Errorf(`APP_ENV must be "development" or "production", got %q`, c.Env)
+	}
+	if c.DBMaxConns < 1 {
+		return fmt.Errorf("DB_MAX_CONNS must be at least 1, got %d", c.DBMaxConns)
+	}
+	if c.DBMinConns < 0 || c.DBMinConns > c.DBMaxConns {
+		return fmt.Errorf("DB_MIN_CONNS must be between 0 and DB_MAX_CONNS (%d), got %d", c.DBMaxConns, c.DBMinConns)
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {
