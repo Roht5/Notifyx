@@ -2,22 +2,41 @@ package consumers
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/rohit-bagade/notifyx/internal/channels/email"
+	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
 
-// NewEmailConsumer creates a consumer for the notifyx.email topic.
-// Phase 6 replaces the stub handler with a real Resend API call.
-func NewEmailConsumer(cfg Config, prod *producer.Producer, log *logger.Logger) (*Consumer, error) {
+// NewEmailConsumer creates a consumer for the notifyx.email topic that sends through Resend.
+// On success it marks the delivery row "delivered". On failure it returns the error and lets
+// the shared retry/DLQ machinery in Consumer handle retries — the DLQ consumer is the one
+// that records the terminal "failed" status, so attempts/error_message reflect one row per
+// Kafka-level delivery outcome rather than incrementing on every retry.
+func NewEmailConsumer(cfg Config, prod *producer.Producer, client *email.Client, deliveries *postgres.NotificationDeliveryRepository, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
-		// TODO(phase-6): call Resend API here.
-		log.Infow("stub: email delivery",
+		if msg.RecipientEmail == "" {
+			return fmt.Errorf("email handler: missing recipient_email")
+		}
+
+		id, err := client.Send(ctx, msg.RecipientEmail, msg.Subject, msg.Body)
+		if err != nil {
+			return fmt.Errorf("resend send failed: %w", err)
+		}
+
+		if err := deliveries.UpdateStatus(ctx, msg.DeliveryID, domain.StatusDelivered, ""); err != nil {
+			log.Errorw("email: mark delivered failed", "notification_id", msg.NotificationID, "error", err)
+		}
+
+		log.Infow("email delivered",
 			"notification_id", msg.NotificationID,
 			"tenant_id", msg.TenantID,
 			"recipient_email", msg.RecipientEmail,
-			"subject", msg.Subject,
+			"provider_message_id", id,
 		)
 		return nil
 	}

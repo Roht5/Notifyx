@@ -12,6 +12,9 @@ import (
 	"github.com/rohit-bagade/notifyx/config"
 	"github.com/rohit-bagade/notifyx/internal/api/handlers"
 	"github.com/rohit-bagade/notifyx/internal/api/routes"
+	"github.com/rohit-bagade/notifyx/internal/channels/email"
+	"github.com/rohit-bagade/notifyx/internal/channels/push"
+	"github.com/rohit-bagade/notifyx/internal/channels/sms"
 	"github.com/rohit-bagade/notifyx/internal/dedup"
 	"github.com/rohit-bagade/notifyx/internal/kafka/consumers"
 	kafkaproducer "github.com/rohit-bagade/notifyx/internal/kafka/producer"
@@ -79,7 +82,7 @@ func main() {
 			APISecret:        cfg.KafkaAPISecret,
 		}
 
-		startConsumers(bgCtx, &bgWg, kafkaCfg, prod, dlqRepo, log)
+		startConsumers(bgCtx, &bgWg, kafkaCfg, cfg, prod, dlqRepo, notificationRepo, deliveryRepo, log)
 		log.Infow("kafka consumers started", "brokers", cfg.KafkaBootstrapServers)
 	} else {
 		log.Warnw("KAFKA_BOOTSTRAP_SERVERS not set — Kafka producer and consumers disabled")
@@ -170,30 +173,71 @@ func main() {
 	log.Infow("Notifyx stopped")
 }
 
-// startConsumers creates all five Kafka consumers and runs each in its own goroutine.
+// startConsumers creates the Kafka consumers and runs each in its own goroutine.
 // bgWg is Done'd when each goroutine exits, so main can wait for a clean drain.
+//
+// The email/push/sms consumers are only started when their provider credentials are
+// configured — mirrors the existing Kafka/Redis-optional convention, so the app still
+// starts locally without every provider's API key set. inapp and dlq have no external
+// provider dependency and always start.
 func startConsumers(
 	ctx context.Context,
 	wg *sync.WaitGroup,
-	cfg consumers.Config,
+	kafkaCfg consumers.Config,
+	cfg *config.Config,
 	prod *kafkaproducer.Producer,
 	dlqRepo *postgres.DLQRepository,
+	notificationRepo *postgres.NotificationRepository,
+	deliveryRepo *postgres.NotificationDeliveryRepository,
 	log *logger.Logger,
 ) {
-	type entry struct {
-		name string
-		c    *consumers.Consumer
-	}
-
 	constructors := []struct {
 		name string
 		fn   func() (*consumers.Consumer, error)
 	}{
-		{"email", func() (*consumers.Consumer, error) { return consumers.NewEmailConsumer(cfg, prod, log) }},
-		{"push", func() (*consumers.Consumer, error) { return consumers.NewPushConsumer(cfg, prod, log) }},
-		{"sms", func() (*consumers.Consumer, error) { return consumers.NewSMSConsumer(cfg, prod, log) }},
-		{"inapp", func() (*consumers.Consumer, error) { return consumers.NewInAppConsumer(cfg, prod, log) }},
-		{"dlq", func() (*consumers.Consumer, error) { return consumers.NewDLQConsumer(cfg, dlqRepo, log) }},
+		{"inapp", func() (*consumers.Consumer, error) { return consumers.NewInAppConsumer(kafkaCfg, prod, log) }},
+		{"dlq", func() (*consumers.Consumer, error) {
+			return consumers.NewDLQConsumer(kafkaCfg, dlqRepo, notificationRepo, deliveryRepo, log)
+		}},
+	}
+
+	if cfg.ResendAPIKey != "" {
+		emailClient := email.NewClient(cfg.ResendAPIKey, cfg.ResendFromEmail)
+		constructors = append(constructors, struct {
+			name string
+			fn   func() (*consumers.Consumer, error)
+		}{"email", func() (*consumers.Consumer, error) {
+			return consumers.NewEmailConsumer(kafkaCfg, prod, emailClient, deliveryRepo, log)
+		}})
+	} else {
+		log.Warnw("RESEND_API_KEY not set — email consumer disabled")
+	}
+
+	if cfg.Fast2SMSAPIKey != "" {
+		smsClient := sms.NewClient(cfg.Fast2SMSAPIKey)
+		constructors = append(constructors, struct {
+			name string
+			fn   func() (*consumers.Consumer, error)
+		}{"sms", func() (*consumers.Consumer, error) {
+			return consumers.NewSMSConsumer(kafkaCfg, prod, smsClient, deliveryRepo, log)
+		}})
+	} else {
+		log.Warnw("FAST2SMS_API_KEY not set — sms consumer disabled")
+	}
+
+	if cfg.FirebaseCredentialsJSON != "" {
+		pushClient, err := push.NewClient(cfg.FirebaseCredentialsJSON)
+		if err != nil {
+			log.Fatalw("create fcm client failed", "error", err)
+		}
+		constructors = append(constructors, struct {
+			name string
+			fn   func() (*consumers.Consumer, error)
+		}{"push", func() (*consumers.Consumer, error) {
+			return consumers.NewPushConsumer(kafkaCfg, prod, pushClient, deliveryRepo, log)
+		}})
+	} else {
+		log.Warnw("FIREBASE_CREDENTIALS_JSON not set — push consumer disabled")
 	}
 
 	for _, ctor := range constructors {

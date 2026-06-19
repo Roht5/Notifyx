@@ -45,10 +45,10 @@ Redis-based safeguards applied to the send pipeline.
 
 ## Phase 6 — Channel Integrations
 Wire up real providers into the Kafka consumers.
-- [ ] Email — Resend integration
-- [ ] Push — Firebase FCM integration
-- [ ] SMS — Fast2SMS integration
-- [ ] Delivery receipt updates (status, delivered_at, attempts)
+- [x] Email — Resend integration
+- [x] Push — Firebase FCM integration
+- [x] SMS — Fast2SMS integration
+- [x] Delivery receipt updates (status, delivered_at, attempts)
 
 ## Phase 7 — WebSocket & In-app
 Real-time in-app delivery with presence and offline support.

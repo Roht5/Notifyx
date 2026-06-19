@@ -31,7 +31,8 @@ type Config struct {
 	KafkaAPISecret        string
 
 	// Resend (Email)
-	ResendAPIKey string
+	ResendAPIKey    string
+	ResendFromEmail string // required if ResendAPIKey is set — Resend rejects sends without a verified "from"
 
 	// Firebase FCM (Push)
 	FirebaseCredentialsJSON string // path to service account JSON file
@@ -65,6 +66,7 @@ func Load() (*Config, error) {
 		KafkaAPIKey:             getEnv("KAFKA_API_KEY", ""),
 		KafkaAPISecret:          getEnv("KAFKA_API_SECRET", ""),
 		ResendAPIKey:            getEnv("RESEND_API_KEY", ""),
+		ResendFromEmail:         getEnv("RESEND_FROM_EMAIL", ""),
 		FirebaseCredentialsJSON: getEnv("FIREBASE_CREDENTIALS_JSON", ""),
 		Fast2SMSAPIKey:          getEnv("FAST2SMS_API_KEY", ""),
 		DefaultRateLimitPerMin:  getEnvInt("DEFAULT_RATE_LIMIT_PER_MIN", 60),
@@ -95,6 +97,9 @@ func (c *Config) Validate() error {
 	}
 	if c.DedupTTL <= 0 {
 		return fmt.Errorf("DEDUP_TTL_HOURS must be positive, got %v", c.DedupTTL)
+	}
+	if c.ResendAPIKey != "" && c.ResendFromEmail == "" {
+		return fmt.Errorf("RESEND_FROM_EMAIL is required when RESEND_API_KEY is set")
 	}
 	return nil
 }

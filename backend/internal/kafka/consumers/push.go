@@ -2,21 +2,38 @@ package consumers
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/rohit-bagade/notifyx/internal/channels/push"
+	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
 
-// NewPushConsumer creates a consumer for the notifyx.push topic.
-// Phase 6 replaces the stub handler with a real Firebase FCM call.
-func NewPushConsumer(cfg Config, prod *producer.Producer, log *logger.Logger) (*Consumer, error) {
+// NewPushConsumer creates a consumer for the notifyx.push topic that sends through Firebase FCM.
+// See NewEmailConsumer for why terminal "failed" status is recorded in the DLQ consumer instead
+// of here.
+func NewPushConsumer(cfg Config, prod *producer.Producer, client *push.Client, deliveries *postgres.NotificationDeliveryRepository, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
-		// TODO(phase-6): call Firebase FCM here.
-		log.Infow("stub: push delivery",
+		if msg.RecipientToken == "" {
+			return fmt.Errorf("push handler: missing recipient_token")
+		}
+
+		name, err := client.Send(ctx, msg.RecipientToken, msg.Subject, msg.Body)
+		if err != nil {
+			return fmt.Errorf("fcm send failed: %w", err)
+		}
+
+		if err := deliveries.UpdateStatus(ctx, msg.DeliveryID, domain.StatusDelivered, ""); err != nil {
+			log.Errorw("push: mark delivered failed", "notification_id", msg.NotificationID, "error", err)
+		}
+
+		log.Infow("push delivered",
 			"notification_id", msg.NotificationID,
 			"tenant_id", msg.TenantID,
-			"recipient_token", msg.RecipientToken,
+			"provider_message_name", name,
 		)
 		return nil
 	}
