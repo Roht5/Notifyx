@@ -32,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log, err := logger.New(cfg.Env)
+	log, err := logger.New(cfg.Env, cfg.LogLevel)
 	if err != nil {
 		println("failed to init logger:", err.Error())
 		os.Exit(1)
@@ -46,7 +46,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL, log)
+	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL, int32(cfg.DBMaxConns), int32(cfg.DBMinConns), log)
 	if err != nil {
 		log.Fatal("database connection failed", "error", err)
 	}
@@ -97,7 +97,7 @@ func main() {
 		}
 		defer redisClient.Close()
 
-		limiter = ratelimit.New(redisClient, rateLimitRepo, cfg.DefaultRateLimitPerMin, cfg.DefaultGlobalCap)
+		limiter = ratelimit.New(redisClient, tenantRepo, rateLimitRepo, cfg.DefaultRateLimitPerMin)
 		deduplicator = dedup.New(redisClient)
 
 		replayer := ratelimit.NewReplayer(notificationRepo, deliveryRepo, limiter, prod, log)
@@ -116,10 +116,11 @@ func main() {
 	h := &routes.Handlers{
 		Health: handlers.NewHealthHandler(),
 		Tenant: handlers.NewTenantHandler(&handlers.TenantService{
-			Tenants:    tenantRepo,
-			APIKeys:    apiKeyRepo,
-			Channels:   channelRepo,
-			RateLimits: rateLimitRepo,
+			Tenants:              tenantRepo,
+			APIKeys:              apiKeyRepo,
+			Channels:             channelRepo,
+			RateLimits:           rateLimitRepo,
+			DefaultGlobalRateCap: cfg.DefaultGlobalCap,
 		}, log),
 		Notification: handlers.NewNotificationHandler(&handlers.NotificationService{
 			Notifications: notificationRepo,
