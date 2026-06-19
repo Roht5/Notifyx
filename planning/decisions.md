@@ -27,6 +27,9 @@ Simpler than a separate `notifyx.scheduled` Kafka topic. The scheduler is a thin
 **segmentio/kafka-go over confluent-kafka-go (deviation from original plan)**
 confluent-kafka-go requires librdkafka (a CGO/C library) which wasn't available in the dev environment and complicates Docker builds. segmentio/kafka-go is pure Go, speaks the same wire protocol, and supports SASL_SSL/PLAIN against Confluent Cloud — no functional loss for this project's needs.
 
+**Rate limit check in the handler/service layer, not as Echo middleware (deviation from task-breakdown wording)**
+A generic middleware can only allow or reject a request — it can't decide to persist a rate-limited notification as `queued_rate_limited` and skip publishing instead of erroring, since that requires writing to Postgres before the handler's business logic even runs. The check lives in `NotificationHandler.processSend` instead, with the same nil-checked degrade-gracefully pattern used for the Kafka producer.
+
 ---
 
 ## Channels

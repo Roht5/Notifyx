@@ -37,11 +37,11 @@ Send, batch, history, and delivery tracking — without channel providers yet (s
 
 ## Phase 5 — Rate Limiting & Deduplication
 Redis-based safeguards applied to the send pipeline.
-- [ ] Upstash Redis client setup
-- [ ] Sliding window rate limiter (per tenant per channel + global cap)
-- [ ] Rate limit middleware wired into send/batch routes
-- [ ] Queuing logic when limit is hit (store + replay)
-- [ ] Idempotency key deduplication (Redis, 24h TTL)
+- [x] Upstash Redis client setup
+- [x] Sliding window rate limiter (per tenant per channel + global cap)
+- [x] Rate limit check wired into send/batch handlers (degrades to "always allow" if REDIS_URL unset)
+- [x] Queuing logic when limit is hit (store as queued_rate_limited + background replayer)
+- [x] Idempotency key deduplication (Redis, 24h TTL)
 
 ## Phase 6 — Channel Integrations
 Wire up real providers into the Kafka consumers.
