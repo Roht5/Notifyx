@@ -78,13 +78,15 @@ Client → WS /ws/connect?tenantId=&userId=
 
 ```sql
 tenants
-  id UUID PK, name TEXT, created_at TIMESTAMP
+  id UUID PK, name TEXT, global_rate_cap INT, created_at TIMESTAMP
 
 tenant_channels
   id UUID PK, tenant_id UUID FK, channel TEXT, enabled BOOL
 
 tenant_rate_limits
-  id UUID PK, tenant_id UUID FK, channel TEXT, max_per_min INT, global_cap INT
+  id UUID PK, tenant_id UUID FK, channel TEXT, max_per_min INT
+  -- global_rate_cap lives on tenants, not here — it's one value per tenant, not one
+  -- per channel row (see decisions.md, "tenant_rate_limits 3NF fix")
 
 api_keys
   id UUID PK, tenant_id UUID FK, key_hash TEXT, created_at TIMESTAMP

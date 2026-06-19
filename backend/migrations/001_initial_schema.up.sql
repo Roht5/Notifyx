@@ -5,9 +5,10 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS tenants (
-    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    name       TEXT        NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name             TEXT        NOT NULL,
+    global_rate_cap  INT         NOT NULL DEFAULT 300,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS tenant_channels (
@@ -21,12 +22,14 @@ CREATE TABLE IF NOT EXISTS tenant_channels (
 
 CREATE INDEX IF NOT EXISTS idx_tenant_channels_tenant_id ON tenant_channels(tenant_id);
 
+-- global_rate_cap lives on tenants, not here: it's a tenant-wide setting, and storing it
+-- on a per-channel row meant a tenant with rate limits on 2 channels could have 2
+-- different "global" caps with no way to tell which one the limiter should actually use.
 CREATE TABLE IF NOT EXISTS tenant_rate_limits (
     id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id    UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     channel      TEXT        NOT NULL,
     max_per_min  INT         NOT NULL DEFAULT 60,
-    global_cap   INT         NOT NULL DEFAULT 300,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, channel)
 );

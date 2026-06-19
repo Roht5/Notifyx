@@ -50,13 +50,16 @@ return 1
 // backed by Redis sorted sets.
 type Limiter struct {
 	client     *redis.Client
+	tenants    *postgres.TenantRepository
 	rateLimits *postgres.TenantRateLimitRepository
 	defaultMax int
-	defaultCap int
 }
 
-func New(client *redis.Client, rateLimits *postgres.TenantRateLimitRepository, defaultMaxPerMin, defaultGlobalCap int) *Limiter {
-	return &Limiter{client: client, rateLimits: rateLimits, defaultMax: defaultMaxPerMin, defaultCap: defaultGlobalCap}
+// New takes only a per-channel default — the global cap always comes from
+// Tenant.GlobalRateCap (every tenant has a concrete value from the moment it's created),
+// so there's no "not configured yet" case for it to fall back from here.
+func New(client *redis.Client, tenants *postgres.TenantRepository, rateLimits *postgres.TenantRateLimitRepository, defaultMaxPerMin int) *Limiter {
+	return &Limiter{client: client, tenants: tenants, rateLimits: rateLimits, defaultMax: defaultMaxPerMin}
 }
 
 // Allow resolves tenantID's configured limits for channel (falling back to the server
@@ -84,13 +87,23 @@ func (l *Limiter) Allow(ctx context.Context, tenantID uuid.UUID, channel domain.
 	return result == 1, nil
 }
 
+// resolveLimits resolves the per-channel max independently from the tenant-wide global
+// cap — they come from different tables on purpose. The global cap is one value per
+// tenant (Tenant.GlobalRateCap), not one per channel row, so a tenant with custom limits
+// on two channels can't end up with two different "global" caps.
 func (l *Limiter) resolveLimits(ctx context.Context, tenantID uuid.UUID, channel domain.Channel) (maxPerMin, globalCap int, err error) {
+	tenant, err := l.tenants.GetByID(ctx, tenantID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("resolve tenant: %w", err)
+	}
+	globalCap = tenant.GlobalRateCap
+
 	rl, err := l.rateLimits.GetByChannel(ctx, tenantID, channel)
 	if err != nil {
 		return 0, 0, fmt.Errorf("resolve rate limit config: %w", err)
 	}
 	if rl == nil {
-		return l.defaultMax, l.defaultCap, nil
+		return l.defaultMax, globalCap, nil
 	}
-	return rl.MaxPerMin, rl.GlobalCap, nil
+	return rl.MaxPerMin, globalCap, nil
 }

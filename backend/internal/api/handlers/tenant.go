@@ -13,11 +13,13 @@ import (
 )
 
 // TenantService groups the repositories the tenant handler needs.
+// DefaultGlobalRateCap seeds Tenant.GlobalRateCap on creation (from DEFAULT_GLOBAL_CAP).
 type TenantService struct {
-	Tenants    *postgres.TenantRepository
-	APIKeys    *postgres.APIKeyRepository
-	Channels   *postgres.TenantChannelRepository
-	RateLimits *postgres.TenantRateLimitRepository
+	Tenants              *postgres.TenantRepository
+	APIKeys              *postgres.APIKeyRepository
+	Channels             *postgres.TenantChannelRepository
+	RateLimits           *postgres.TenantRateLimitRepository
+	DefaultGlobalRateCap int
 }
 
 // TenantHandler handles all /api/v1/tenants routes.
@@ -69,15 +71,22 @@ func (r *updateChannelsRequest) Validate() error {
 	return nil
 }
 
+// updateRateLimitsRequest separates the tenant-wide global cap (one value, optional —
+// only updated if present) from the per-channel max_per_min array. Earlier this request
+// took global_cap once per channel entry, which let the same tenant end up with N
+// different "global" caps stored across N channel rows — see decisions.md.
 type updateRateLimitsRequest struct {
+	GlobalCap  *int `json:"global_cap,omitempty"`
 	RateLimits []struct {
 		Channel   string `json:"channel"`
 		MaxPerMin int    `json:"max_per_min"`
-		GlobalCap int    `json:"global_cap"`
 	} `json:"rate_limits"`
 }
 
 func (r *updateRateLimitsRequest) Validate() error {
+	if r.GlobalCap != nil && *r.GlobalCap <= 0 {
+		return fmt.Errorf("global_cap must be greater than 0")
+	}
 	for _, rl := range r.RateLimits {
 		if !isValidChannel(rl.Channel) {
 			return fmt.Errorf("invalid channel %q: must be one of email, push, sms, inapp", rl.Channel)
@@ -85,11 +94,13 @@ func (r *updateRateLimitsRequest) Validate() error {
 		if rl.MaxPerMin <= 0 {
 			return fmt.Errorf("max_per_min must be greater than 0")
 		}
-		if rl.GlobalCap <= 0 {
-			return fmt.Errorf("global_cap must be greater than 0")
-		}
 	}
 	return nil
+}
+
+type rateLimitsResponse struct {
+	GlobalCap  int                       `json:"global_cap"`
+	RateLimits []*domain.TenantRateLimit `json:"rate_limits"`
 }
 
 func isValidChannel(ch string) bool {
@@ -112,7 +123,7 @@ func (h *TenantHandler) Create(c echo.Context) error {
 		return errResponse(c, http.StatusUnprocessableEntity, err.Error())
 	}
 
-	tenant, err := h.svc.Tenants.Create(c.Request().Context(), req.Name)
+	tenant, err := h.svc.Tenants.Create(c.Request().Context(), req.Name, h.svc.DefaultGlobalRateCap)
 	if err != nil {
 		h.log.Errorw("create tenant failed", "error", err)
 		return errResponse(c, http.StatusInternalServerError, "failed to create tenant")
@@ -260,16 +271,24 @@ func (h *TenantHandler) UpdateRateLimits(c echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	// Verify the tenant exists before upserting child rows.
-	if _, err := h.svc.Tenants.GetByID(ctx, id); err != nil {
+	tenant, err := h.svc.Tenants.GetByID(ctx, id)
+	if err != nil {
 		if errors.Is(err, postgres.ErrNotFound) {
 			return errResponse(c, http.StatusNotFound, "tenant not found")
 		}
 		return errResponse(c, http.StatusInternalServerError, "failed to verify tenant")
 	}
 
+	if req.GlobalCap != nil {
+		tenant, err = h.svc.Tenants.UpdateGlobalRateCap(ctx, id, *req.GlobalCap)
+		if err != nil {
+			h.log.Errorw("update global rate cap failed", "error", err)
+			return errResponse(c, http.StatusInternalServerError, "failed to update global rate cap")
+		}
+	}
+
 	for _, rl := range req.RateLimits {
-		if err := h.svc.RateLimits.Upsert(ctx, id, domain.Channel(rl.Channel), rl.MaxPerMin, rl.GlobalCap); err != nil {
+		if err := h.svc.RateLimits.Upsert(ctx, id, domain.Channel(rl.Channel), rl.MaxPerMin); err != nil {
 			h.log.Errorw("upsert rate limit failed", "error", err)
 			return errResponse(c, http.StatusInternalServerError, "failed to update rate limits")
 		}
@@ -279,5 +298,5 @@ func (h *TenantHandler) UpdateRateLimits(c echo.Context) error {
 	if err != nil {
 		return errResponse(c, http.StatusInternalServerError, "failed to fetch rate limits")
 	}
-	return c.JSON(http.StatusOK, limits)
+	return c.JSON(http.StatusOK, rateLimitsResponse{GlobalCap: tenant.GlobalRateCap, RateLimits: limits})
 }
