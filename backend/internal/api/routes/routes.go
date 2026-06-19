@@ -6,6 +6,7 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/api/handlers"
 	"github.com/rohit-bagade/notifyx/internal/api/middleware"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
+	"github.com/rohit-bagade/notifyx/internal/ws"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
 
@@ -14,6 +15,7 @@ type Handlers struct {
 	Tenant       *handlers.TenantHandler
 	Health       *handlers.HealthHandler
 	Notification *handlers.NotificationHandler
+	WS           *ws.Handler
 }
 
 // Setup creates the Echo instance, registers global middleware, and wires all routes.
@@ -37,6 +39,11 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 
 	// Health — no auth required (used by Render's health check probe).
 	e.GET("/health", h.Health.Check)
+
+	// In-app WebSocket connect — auth is via apiKey query param, not the X-API-Key header
+	// middleware, since browsers' WebSocket API can't set custom handshake headers. Auth is
+	// handled inside ws.Handler.Connect, so this is registered outside the authMW group.
+	e.GET("/ws/connect", h.WS.Connect)
 
 	// Tenant routes — no auth (super-admin, open for portfolio purposes per decisions.md).
 	tenants := e.Group("/api/v1/tenants")

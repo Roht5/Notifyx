@@ -52,12 +52,12 @@ Wire up real providers into the Kafka consumers.
 
 ## Phase 7 — WebSocket & In-app
 Real-time in-app delivery with presence and offline support.
-- [ ] Gorilla WebSocket server
-- [ ] WS /ws/connect?tenantId=&userId= endpoint
-- [ ] Presence tracking in Redis
-- [ ] Online delivery (push directly over WS)
-- [ ] Offline queue (Redis list, flush on reconnect)
-- [ ] In-app Kafka consumer wired to WS delivery
+- [x] Gorilla WebSocket server
+- [x] WS /ws/connect?tenantId=&userId= endpoint
+- [x] Presence tracking in Redis
+- [x] Online delivery (push directly over WS)
+- [x] Offline queue (Redis list, flush on reconnect)
+- [x] In-app Kafka consumer wired to WS delivery
 
 ## Phase 8 — Templates
 Template CRUD and rendering at send time.

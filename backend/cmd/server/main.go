@@ -18,10 +18,14 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/dedup"
 	"github.com/rohit-bagade/notifyx/internal/kafka/consumers"
 	kafkaproducer "github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/offlinequeue"
+	"github.com/rohit-bagade/notifyx/internal/presence"
 	"github.com/rohit-bagade/notifyx/internal/ratelimit"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	redisrepo "github.com/rohit-bagade/notifyx/internal/repository/redis"
+	"github.com/rohit-bagade/notifyx/internal/ws"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // replayInterval is how often the rate-limit replayer re-checks queued_rate_limited
@@ -64,11 +68,43 @@ func main() {
 	notificationRepo := postgres.NewNotificationRepository(pool)
 	deliveryRepo := postgres.NewNotificationDeliveryRepository(pool)
 
+	bgCtx, cancelBg := context.WithCancel(context.Background())
+	var bgWg sync.WaitGroup
+
+	// Redis — rate limiting, dedup, and in-app presence/offline-queue, only started when
+	// REDIS_URL is set. Like Kafka, this lets the app run locally without Redis; sends then
+	// skip rate limiting/dedup, and in-app delivery falls back to the Kafka retry/DLQ path
+	// for any recipient who's offline at delivery time.
+	var limiter *ratelimit.Limiter
+	var deduplicator *dedup.Deduplicator
+	var presenceTracker *presence.Tracker
+	var offlineQueue *offlinequeue.Queue
+	var redisClient *goredis.Client
+
+	if cfg.RedisURL != "" {
+		redisClient, err = redisrepo.NewClient(ctx, cfg.RedisURL, log)
+		if err != nil {
+			log.Fatal("create redis client failed", "error", err)
+		}
+		defer redisClient.Close()
+
+		limiter = ratelimit.New(redisClient, tenantRepo, rateLimitRepo, cfg.DefaultRateLimitPerMin)
+		deduplicator = dedup.New(redisClient, cfg.DedupTTL)
+		presenceTracker = presence.New(redisClient)
+		offlineQueue = offlinequeue.New(redisClient)
+
+		log.Infow("rate limiting, dedup, and in-app presence/offline-queue enabled")
+	} else {
+		log.Warnw("REDIS_URL not set — rate limiting, dedup, and in-app offline queue disabled")
+	}
+
+	// In-app WebSocket hub — always created (no external dependency), so direct in-app
+	// delivery to currently-connected clients works even without Redis.
+	hub := ws.NewHub(log)
+
 	// Kafka — only started when KAFKA_BOOTSTRAP_SERVERS is set.
 	// This lets the app start without Kafka during local development / DB-only testing.
 	var prod *kafkaproducer.Producer
-	bgCtx, cancelBg := context.WithCancel(context.Background())
-	var bgWg sync.WaitGroup
 
 	if cfg.KafkaBootstrapServers != "" {
 		prod, err = kafkaproducer.New(cfg.KafkaBootstrapServers, cfg.KafkaAPIKey, cfg.KafkaAPISecret, log)
@@ -82,42 +118,27 @@ func main() {
 			APISecret:        cfg.KafkaAPISecret,
 		}
 
-		startConsumers(bgCtx, &bgWg, kafkaCfg, cfg, prod, dlqRepo, notificationRepo, deliveryRepo, log)
+		startConsumers(bgCtx, &bgWg, kafkaCfg, cfg, prod, hub, offlineQueue, dlqRepo, notificationRepo, deliveryRepo, log)
 		log.Infow("kafka consumers started", "brokers", cfg.KafkaBootstrapServers)
 	} else {
 		log.Warnw("KAFKA_BOOTSTRAP_SERVERS not set — Kafka producer and consumers disabled")
 	}
 
-	// Redis — rate limiting and dedup, only started when REDIS_URL is set. Like Kafka,
-	// this lets the app run locally without Redis; sends then skip both checks entirely.
-	var limiter *ratelimit.Limiter
-	var deduplicator *dedup.Deduplicator
-
-	if cfg.RedisURL != "" {
-		redisClient, err := redisrepo.NewClient(ctx, cfg.RedisURL, log)
-		if err != nil {
-			log.Fatal("create redis client failed", "error", err)
-		}
-		defer redisClient.Close()
-
-		limiter = ratelimit.New(redisClient, tenantRepo, rateLimitRepo, cfg.DefaultRateLimitPerMin)
-		deduplicator = dedup.New(redisClient, cfg.DedupTTL)
-
+	// Rate-limit replayer — needs the real (possibly-nil) Kafka producer, so it's built
+	// after the Kafka block runs rather than alongside the rest of Redis setup above.
+	if redisClient != nil {
 		replayer := ratelimit.NewReplayer(notificationRepo, deliveryRepo, limiter, prod, log)
 		bgWg.Add(1)
 		go func() {
 			defer bgWg.Done()
 			replayer.Run(bgCtx, replayInterval)
 		}()
-
-		log.Infow("rate limiting and dedup enabled")
-	} else {
-		log.Warnw("REDIS_URL not set — rate limiting and deduplication disabled")
 	}
 
 	// HTTP handlers and routes.
 	h := &routes.Handlers{
 		Health: handlers.NewHealthHandler(),
+		WS:     ws.NewHandler(hub, presenceTracker, offlineQueue, apiKeyRepo, log),
 		Tenant: handlers.NewTenantHandler(&handlers.TenantService{
 			Tenants:              tenantRepo,
 			APIKeys:              apiKeyRepo,
@@ -186,6 +207,8 @@ func startConsumers(
 	kafkaCfg consumers.Config,
 	cfg *config.Config,
 	prod *kafkaproducer.Producer,
+	hub *ws.Hub,
+	offlineQueue *offlinequeue.Queue,
 	dlqRepo *postgres.DLQRepository,
 	notificationRepo *postgres.NotificationRepository,
 	deliveryRepo *postgres.NotificationDeliveryRepository,
@@ -195,7 +218,9 @@ func startConsumers(
 		name string
 		fn   func() (*consumers.Consumer, error)
 	}{
-		{"inapp", func() (*consumers.Consumer, error) { return consumers.NewInAppConsumer(kafkaCfg, prod, log) }},
+		{"inapp", func() (*consumers.Consumer, error) {
+			return consumers.NewInAppConsumer(kafkaCfg, prod, hub, offlineQueue, deliveryRepo, log)
+		}},
 		{"dlq", func() (*consumers.Consumer, error) {
 			return consumers.NewDLQConsumer(kafkaCfg, dlqRepo, notificationRepo, deliveryRepo, log)
 		}},
