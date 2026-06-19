@@ -72,11 +72,11 @@ type NotificationDelivery struct {
 
 // DLQMessage represents a notification that exhausted all retry attempts.
 type DLQMessage struct {
-	ID             uuid.UUID
-	NotificationID uuid.UUID
-	Channel        Channel
-	Error          string
-	Attempts       int
-	LastTriedAt    time.Time
-	CreatedAt      time.Time
+	ID             uuid.UUID `json:"id"`
+	NotificationID uuid.UUID `json:"notification_id"`
+	Channel        Channel   `json:"channel"`
+	Error          string    `json:"error"`
+	Attempts       int       `json:"attempts"`
+	LastTriedAt    time.Time `json:"last_tried_at"`
+	CreatedAt      time.Time `json:"created_at"`
 }
