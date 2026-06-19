@@ -12,11 +12,18 @@ import (
 	"github.com/rohit-bagade/notifyx/config"
 	"github.com/rohit-bagade/notifyx/internal/api/handlers"
 	"github.com/rohit-bagade/notifyx/internal/api/routes"
+	"github.com/rohit-bagade/notifyx/internal/dedup"
 	"github.com/rohit-bagade/notifyx/internal/kafka/consumers"
 	kafkaproducer "github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/ratelimit"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
+	redisrepo "github.com/rohit-bagade/notifyx/internal/repository/redis"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
+
+// replayInterval is how often the rate-limit replayer re-checks queued_rate_limited
+// notifications to see if their tenant's window has cleared.
+const replayInterval = 15 * time.Second
 
 func main() {
 	cfg, err := config.Load()
@@ -57,8 +64,8 @@ func main() {
 	// Kafka — only started when KAFKA_BOOTSTRAP_SERVERS is set.
 	// This lets the app start without Kafka during local development / DB-only testing.
 	var prod *kafkaproducer.Producer
-	consumerCtx, cancelConsumers := context.WithCancel(context.Background())
-	var consumerWg sync.WaitGroup
+	bgCtx, cancelBg := context.WithCancel(context.Background())
+	var bgWg sync.WaitGroup
 
 	if cfg.KafkaBootstrapServers != "" {
 		prod, err = kafkaproducer.New(cfg.KafkaBootstrapServers, cfg.KafkaAPIKey, cfg.KafkaAPISecret, log)
@@ -72,10 +79,37 @@ func main() {
 			APISecret:        cfg.KafkaAPISecret,
 		}
 
-		startConsumers(consumerCtx, &consumerWg, kafkaCfg, prod, dlqRepo, log)
+		startConsumers(bgCtx, &bgWg, kafkaCfg, prod, dlqRepo, log)
 		log.Infow("kafka consumers started", "brokers", cfg.KafkaBootstrapServers)
 	} else {
 		log.Warnw("KAFKA_BOOTSTRAP_SERVERS not set — Kafka producer and consumers disabled")
+	}
+
+	// Redis — rate limiting and dedup, only started when REDIS_URL is set. Like Kafka,
+	// this lets the app run locally without Redis; sends then skip both checks entirely.
+	var limiter *ratelimit.Limiter
+	var deduplicator *dedup.Deduplicator
+
+	if cfg.RedisURL != "" {
+		redisClient, err := redisrepo.NewClient(ctx, cfg.RedisURL, log)
+		if err != nil {
+			log.Fatal("create redis client failed", "error", err)
+		}
+		defer redisClient.Close()
+
+		limiter = ratelimit.New(redisClient, rateLimitRepo, cfg.DefaultRateLimitPerMin, cfg.DefaultGlobalCap)
+		deduplicator = dedup.New(redisClient)
+
+		replayer := ratelimit.NewReplayer(notificationRepo, deliveryRepo, limiter, prod, log)
+		bgWg.Add(1)
+		go func() {
+			defer bgWg.Done()
+			replayer.Run(bgCtx, replayInterval)
+		}()
+
+		log.Infow("rate limiting and dedup enabled")
+	} else {
+		log.Warnw("REDIS_URL not set — rate limiting and deduplication disabled")
 	}
 
 	// HTTP handlers and routes.
@@ -92,6 +126,8 @@ func main() {
 			Deliveries:    deliveryRepo,
 			Channels:      channelRepo,
 			Producer:      prod,
+			RateLimiter:   limiter,
+			Dedup:         deduplicator,
 		}, log),
 	}
 	e := routes.Setup(h, apiKeyRepo, log)
@@ -111,9 +147,10 @@ func main() {
 
 	log.Infow("shutdown signal received, draining...")
 
-	// 1. Stop consumers — let in-flight messages complete.
-	cancelConsumers()
-	consumerWg.Wait()
+	// 1. Stop background workers (Kafka consumers, rate-limit replayer) — let in-flight
+	// work complete.
+	cancelBg()
+	bgWg.Wait()
 
 	// 2. Flush the producer — ensure no messages are lost in the send buffer.
 	if prod != nil {
@@ -131,7 +168,7 @@ func main() {
 }
 
 // startConsumers creates all five Kafka consumers and runs each in its own goroutine.
-// consumerWg is Done'd when each goroutine exits, so main can wait for a clean drain.
+// bgWg is Done'd when each goroutine exits, so main can wait for a clean drain.
 func startConsumers(
 	ctx context.Context,
 	wg *sync.WaitGroup,

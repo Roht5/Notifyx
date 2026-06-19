@@ -9,21 +9,27 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/rohit-bagade/notifyx/internal/dedup"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/ratelimit"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
 
-// NotificationService groups the repositories and Kafka producer the notification handler needs.
-// Producer is nil when KAFKA_BOOTSTRAP_SERVERS isn't configured — Send/Batch still persist the
-// notification, but publishing is skipped (logged as a warning) until Kafka is wired up.
+// NotificationService groups the repositories and infra clients the notification handler
+// needs. Producer is nil when KAFKA_BOOTSTRAP_SERVERS isn't configured — sends still
+// persist, but publishing is skipped (logged as a warning) until Kafka is wired up.
+// RateLimiter and Dedup are nil when REDIS_URL isn't configured — sends then skip both
+// checks entirely (always allowed, no dedup).
 type NotificationService struct {
 	Notifications *postgres.NotificationRepository
 	Deliveries    *postgres.NotificationDeliveryRepository
 	Channels      *postgres.TenantChannelRepository
 	Producer      *producer.Producer
+	RateLimiter   *ratelimit.Limiter
+	Dedup         *dedup.Deduplicator
 }
 
 // NotificationHandler handles all /api/v1/notifications routes.
@@ -48,6 +54,7 @@ type sendNotificationRequest struct {
 	Subject        string         `json:"subject,omitempty"`
 	Body           string         `json:"body"`
 	Metadata       map[string]any `json:"metadata,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 }
 
 func (r *sendNotificationRequest) Validate() error {
@@ -76,12 +83,13 @@ type batchRecipient struct {
 }
 
 type batchSendRequest struct {
-	Channel    string           `json:"channel"`
-	Priority   string           `json:"priority,omitempty"`
-	Subject    string           `json:"subject,omitempty"`
-	Body       string           `json:"body"`
-	Metadata   map[string]any   `json:"metadata,omitempty"`
-	Recipients []batchRecipient `json:"recipients"`
+	Channel        string           `json:"channel"`
+	Priority       string           `json:"priority,omitempty"`
+	Subject        string           `json:"subject,omitempty"`
+	Body           string           `json:"body"`
+	Metadata       map[string]any   `json:"metadata,omitempty"`
+	Recipients     []batchRecipient `json:"recipients"`
+	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 }
 
 func (r *batchSendRequest) Validate() error {
@@ -212,7 +220,8 @@ func (h *NotificationHandler) Send(c echo.Context) error {
 		priority = domain.PriorityNormal
 	}
 
-	notification, _, err := h.createAndQueue(ctx, postgres.CreateNotificationParams{
+	notificationID, status, duplicate, errMsg := h.processSend(ctx, req.IdempotencyKey, postgres.CreateNotificationParams{
+		ID:             uuid.New(),
 		TenantID:       tenant.ID,
 		Channel:        channel,
 		Priority:       priority,
@@ -224,15 +233,15 @@ func (h *NotificationHandler) Send(c echo.Context) error {
 		Body:           req.Body,
 		Metadata:       req.Metadata,
 	})
-	if err != nil {
-		h.log.Errorw("send notification failed", "error", err)
-		return errResponse(c, http.StatusInternalServerError, "failed to send notification")
+	if errMsg != "" {
+		return errResponse(c, http.StatusInternalServerError, errMsg)
 	}
 
-	return c.JSON(http.StatusCreated, sendNotificationResponse{
-		NotificationID: notification.ID.String(),
-		Status:         notification.Status,
-	})
+	httpStatus := http.StatusCreated
+	if duplicate {
+		httpStatus = http.StatusOK
+	}
+	return c.JSON(httpStatus, sendNotificationResponse{NotificationID: notificationID, Status: status})
 }
 
 // Batch POST /api/v1/notifications/batch
@@ -266,7 +275,16 @@ func (h *NotificationHandler) Batch(c echo.Context) error {
 
 	results := make([]batchResult, len(req.Recipients))
 	for i, rec := range req.Recipients {
-		notification, _, err := h.createAndQueue(ctx, postgres.CreateNotificationParams{
+		// Combined with the recipient's position so one shared idempotency_key on the
+		// batch request still dedups each recipient independently (architecture.md:
+		// "Dedup check per recipient (idempotency_key + recipientId)").
+		idempotencyKey := ""
+		if req.IdempotencyKey != "" {
+			idempotencyKey = fmt.Sprintf("%s:%d", req.IdempotencyKey, i)
+		}
+
+		notificationID, _, _, errMsg := h.processSend(ctx, idempotencyKey, postgres.CreateNotificationParams{
+			ID:             uuid.New(),
 			TenantID:       tenant.ID,
 			Channel:        channel,
 			Priority:       priority,
@@ -278,12 +296,11 @@ func (h *NotificationHandler) Batch(c echo.Context) error {
 			Body:           req.Body,
 			Metadata:       req.Metadata,
 		})
-		if err != nil {
-			h.log.Errorw("batch recipient failed", "index", i, "error", err)
-			results[i] = batchResult{Index: i, Error: "failed to send notification"}
+		if errMsg != "" {
+			results[i] = batchResult{Index: i, Error: errMsg}
 			continue
 		}
-		results[i] = batchResult{Index: i, NotificationID: notification.ID.String()}
+		results[i] = batchResult{Index: i, NotificationID: notificationID}
 	}
 
 	return c.JSON(http.StatusCreated, batchSendResponse{Results: results})
@@ -379,19 +396,82 @@ func (h *NotificationHandler) Get(c echo.Context) error {
 	})
 }
 
-// createAndQueue persists a notification and its delivery row, then publishes it to the
-// channel's Kafka topic. If the producer isn't configured (no KAFKA_BOOTSTRAP_SERVERS),
-// publishing is skipped and a warning is logged — the notification still persists so it
-// isn't lost once Kafka is wired up.
-func (h *NotificationHandler) createAndQueue(ctx context.Context, p postgres.CreateNotificationParams) (*domain.Notification, *domain.NotificationDelivery, error) {
+// processSend runs the full per-notification pipeline shared by Send and Batch: dedup
+// check, rate limit check, persist, and (if allowed) publish to Kafka. idempotencyKey may
+// be empty to skip dedup entirely. p.ID must already be set by the caller — it's generated
+// up front so a dedup reservation can point at it before the notification is created.
+//
+// Returns either a fresh or a deduped notification ID + status, or a non-empty errMsg
+// (already safe to surface to the client) on failure.
+func (h *NotificationHandler) processSend(ctx context.Context, idempotencyKey string, p postgres.CreateNotificationParams) (notificationID string, status domain.Status, duplicate bool, errMsg string) {
+	if idempotencyKey != "" && h.svc.Dedup != nil {
+		claimed, existingID, err := h.svc.Dedup.Reserve(ctx, idempotencyKey, p.ID)
+		if err != nil {
+			h.log.Errorw("dedup reserve failed", "error", err)
+			return "", "", false, "failed to process request"
+		}
+		if !claimed {
+			existing, err := h.svc.Notifications.GetByID(ctx, existingID)
+			if err != nil {
+				h.log.Errorw("dedup: fetch original notification failed", "error", err)
+				return "", "", false, "failed to process request"
+			}
+			return existing.ID.String(), existing.Status, true, ""
+		}
+	}
+
+	p.Status = domain.StatusPending
+	publish := true
+	if h.svc.RateLimiter != nil {
+		allowed, err := h.svc.RateLimiter.Allow(ctx, p.TenantID, p.Channel)
+		if err != nil {
+			h.log.Errorw("rate limit check failed", "error", err)
+			h.releaseDedup(ctx, idempotencyKey)
+			return "", "", false, "failed to process request"
+		}
+		if !allowed {
+			p.Status = domain.StatusQueuedRateLimited
+			publish = false
+		}
+	}
+	p.IdempotencyKey = idempotencyKey
+
+	notification, _, err := h.createAndQueue(ctx, p, publish)
+	if err != nil {
+		h.log.Errorw("create and queue failed", "error", err)
+		h.releaseDedup(ctx, idempotencyKey)
+		return "", "", false, "failed to send notification"
+	}
+
+	return notification.ID.String(), notification.Status, false, ""
+}
+
+func (h *NotificationHandler) releaseDedup(ctx context.Context, idempotencyKey string) {
+	if idempotencyKey == "" || h.svc.Dedup == nil {
+		return
+	}
+	if err := h.svc.Dedup.Release(ctx, idempotencyKey); err != nil {
+		h.log.Errorw("dedup release failed", "error", err)
+	}
+}
+
+// createAndQueue persists a notification and its delivery row, then — if publish is true —
+// publishes it to the channel's Kafka topic. If the producer isn't configured (no
+// KAFKA_BOOTSTRAP_SERVERS), publishing is skipped and a warning is logged — the
+// notification still persists so it isn't lost once Kafka is wired up.
+func (h *NotificationHandler) createAndQueue(ctx context.Context, p postgres.CreateNotificationParams, publish bool) (*domain.Notification, *domain.NotificationDelivery, error) {
 	notification, err := h.svc.Notifications.Create(ctx, p)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create notification: %w", err)
 	}
 
-	delivery, err := h.svc.Deliveries.Create(ctx, notification.ID, p.Channel)
+	delivery, err := h.svc.Deliveries.Create(ctx, notification.ID, p.Channel, p.Status)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create delivery: %w", err)
+	}
+
+	if !publish {
+		return notification, delivery, nil
 	}
 
 	if h.svc.Producer == nil {
