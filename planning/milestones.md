@@ -11,11 +11,11 @@ Project scaffold, configuration, database, domain models, logger.
 
 ## Phase 2 — Tenant & Auth
 Tenant management and API key authentication.
-- [ ] Tenant CRUD (POST, GET, PUT, DELETE /api/v1/tenants)
-- [ ] API key generation + hashing (bcrypt)
-- [ ] API key auth middleware
-- [ ] Tenant channel opt-in management
-- [ ] Tenant rate limit configuration
+- [x] Tenant CRUD (POST, GET, PUT, DELETE /api/v1/tenants)
+- [x] API key generation + hashing (SHA-256, not bcrypt — see apikey.go comment)
+- [x] API key auth middleware
+- [x] Tenant channel opt-in management
+- [x] Tenant rate limit configuration
 
 ## Phase 3 — Kafka Infrastructure
 Producer and consumer scaffolding before any channel is wired up.
