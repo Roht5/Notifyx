@@ -153,3 +153,43 @@ Render has a reliable free tier for both web services and PostgreSQL. Railway's 
 
 **Docker Compose for local dev**
 Reproducible local environment. Single command to spin up all dependencies. Standard practice for distributed systems projects.
+
+---
+
+## Phase 2/3 Code Review (Codex) — 2026-06-19
+
+**`Executor` interface + `WithTx` helper for transactional multi-write handlers (bug fix)**
+Tenant creation (tenant + first API key) and the channel/rate-limit bulk-update loops each issued multiple independent writes with no transaction, so a mid-loop failure left partial state committed. Added a small `Executor` interface (`Exec`/`Query`/`QueryRow`) that both `*pgxpool.Pool` and `pgx.Tx` satisfy, plus `WithTx(ctx, pool, fn)`, so the same repository code runs against either. `tenant.go`'s `Create`, `UpdateChannels`, and `UpdateRateLimits` now wrap their multi-write sequences in `WithTx`. Verified against a real local Postgres and live HTTP calls.
+
+**API key rotation/revocation endpoints added (security gap fix)**
+The only way to invalidate a compromised API key was deleting the whole tenant (cascades to all their data). `APIKeyRepository` already had unused `Create`/`Delete`/`GetByTenantID` methods from an earlier phase, never wired to a route. Added `POST/GET /tenants/:id/keys` and `DELETE /tenants/:id/keys/:key_id`. `DeleteKey` doesn't verify the key belongs to `:id` first — `api_keys.id` is globally unique and these are already unauthenticated super-admin routes, so `:id` is just URL shape, not an authorization boundary. Verified live: create → rotate in a second key → list shows 2 → revoke → list shows 1.
+
+**Redis caching for `key_hash → tenant` auth lookups: deferred, not implemented**
+Every authenticated request hits Postgres via `GetTenantByKeyHash` — won't scale to high send throughput. Not building it now: no real production load to size a TTL against, and correct invalidation (on tenant delete *and* the key revocation endpoint just added) is real complexity for a problem that doesn't exist yet. Tracked as a Phase 13+ checklist item: cache in Redis with a 5–15 min TTL, invalidate on delete/revoke/update.
+
+**`TenantFromContext` made a safe assertion; added `RequireTenant` helper (bug fix, different shape than reviewer suggested)**
+`TenantFromContext` did an unchecked type assertion (`c.Get("tenant").(*domain.Tenant)`) that panics if a route is ever registered without the auth middleware. The reviewer's suggested fix (`(*domain.Tenant, bool)` return) only moves the panic to the next line, where every caller immediately dereferences the tenant. Instead made the assertion safe (returns nil) and added `RequireTenant(c) (*domain.Tenant, error)`, which writes a clean 500 instead of panicking. All 4 call sites in `notification.go` updated. Verified live.
+
+**`rows.Err()` checks added after every `for rows.Next()` loop (data-integrity bug fix)**
+A connection drop mid-scan makes `rows.Next()` return `false` with no error visible to the caller, silently truncating result sets. Fixed in the 4 files the review flagged (`tenant_repo.go`, `api_key_repo.go`, `tenant_channel_repo.go`, `tenant_rate_limit_repo.go`) plus 2 more found by the same pattern while converting these files to the `Executor` interface (`notification_repo.go`, `notification_delivery_repo.go`). Left `TenantRateLimitRepository.GetByChannel`'s separate bug (swallows all `QueryRow` errors as "use default", not just `ErrNoRows`) unfixed — real but out of scope for this pass.
+
+**CORS middleware added (dashboard blocker fix)**
+No CORS config existed; the Phase 12 Flutter Web dashboard would have every fetch silently dropped by the browser. Added Echo's CORS middleware with `AllowOrigins: []string{"*"}` — acceptable since the dashboard is unauthenticated (no cookies/credentials in play); tighten to a specific origin once Phase 12 ships a deployed dashboard. Verified live via curl.
+
+**Kafka partition key changed from `msg.Priority` to `msg.NotificationID` (bug fix, not the reviewer's literal suggestion)**
+Keying on priority (3-4 distinct values) sent every message of one priority to the same partition regardless of partition count — worse than no key, since it killed parallelism across consumers without providing any actual priority preemption (Kafka has no mechanism for a consumer to jump a "critical" partition ahead of a "normal" one anyway). Reviewer suggested splitting into one topic per priority class plus weighted polling; rejected as premature — multiplies topic count 4x with no priority-aware consumer scheduling yet built to use it. Switched the key to `msg.NotificationID` instead: high-cardinality (restores partition spread) while still routing one notification's messages to the same partition for ordering. True priority preemption remains unsolved; tracked as a Phase 13+ item if priority semantics ever become a real product requirement.
+
+**Kafka consumer commit-safety: `handleWithRetry` returns `bool`, `Run()` only commits on success (data-loss bug fix)**
+The consumer committed the offset unconditionally after `handleWithRetry`, regardless of whether the DLQ publish (on retry exhaustion) succeeded, or whether a shutdown signal interrupted a retry backoff mid-flight. Both cases silently dropped a message with no record anywhere. Changed `handleWithRetry` to return `bool` ("safe to commit"): `true` on handler success, on an unprocessable/malformed message, or after a confirmed DLQ publish; `false` if the DLQ publish itself failed or `ctx.Done()` fired during a retry wait. `Run()` only calls `CommitMessages` on `true`. This single mechanism fixes both the "silent DLQ publish failure" and "premature commit on shutdown" issues the review raised separately.
+
+**`Message.LastError` field carries the real failure reason into the DLQ (bug fix, JSON field instead of Kafka headers)**
+The DLQ consumer persisted a hardcoded `"exhausted delivery retries"` string, discarding the actual provider error (e.g. a 401 from Resend). Reviewer suggested Kafka message headers; used a JSON field on the existing `Message` struct instead, since the whole message is already JSON-decoded on both ends — no header encode/decode code needed. `handleWithRetry` sets `msg.LastError` before the DLQ publish; `dlq.go` reads it instead of the hardcoded string.
+
+**`fetchErrorBackoff` (2s) added before retrying a failed `FetchMessage` (bug fix)**
+A persistent broker/network error looped with no delay, spiking CPU and flooding logs. Added a 2-second backoff via `select` on a timer or `ctx.Done()` (not a bare `time.Sleep`, so shutdown isn't delayed by the backoff window).
+
+**`RequiredAcks` changed from `RequireOne` to `RequireAll` in the Kafka producer (bug fix)**
+`RequireOne` only waits for the partition leader to ack, risking data loss if the leader fails before replicating. Changed to `RequireAll` for full in-sync-replica acknowledgment before a publish is considered successful.
+
+**Kafka auto-commit (`CommitInterval > 0`) rejected, not implemented**
+Reviewer flagged synchronous per-offset commits as a throughput bottleneck and suggested auto-commit on a timer. Rejected: auto-commit has no concept of "this message wasn't safely handled yet" — it would commit on a fixed schedule regardless of `handleWithRetry`'s return value, silently undoing the commit-safety fix above and reintroducing the exact data-loss bug it fixed. No throughput measurement exists yet to justify the tradeoff. If ever needed, the right fix is manual batched commits that still respect the safety signal, not blanket auto-commit. Tracked as a Phase 13+ item, gated on having an actual throughput number.
