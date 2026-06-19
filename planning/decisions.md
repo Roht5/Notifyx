@@ -298,3 +298,22 @@ The milestone wording ("wire template rendering into all channel consumers") rea
 
 **Verified live against local Postgres (no Kafka running)**
 `go build ./...` / `go vet ./...` pass. Enabled the email channel, scheduled a notification 5s in the future — confirmed the response and the persisted row both show `status: pending` with `scheduled_at` set, and no Kafka publish occurs at create time. Confirmed `scheduled_at` validation rejects past timestamps and missing values (422). Waited through two scheduler ticks (30s apart): each logged `"scheduler: kafka not configured — scheduled notification due but not published"` and left the `scheduled_notifications` row `fired = false` and the notification `status = pending` — confirming the no-Kafka retry-by-omission behavior rather than a false "fired" state. Verified the cleanup query's `WHERE expires_at < NOW()` logic directly against an inserted already-expired row (deleted correctly) — the 24h ticker itself wasn't run end-to-end live since that would require waiting a day, but the query it executes is the same one verified directly.
+
+## Phase 10 — Analytics — 2026-06-20
+
+**New `AnalyticsRepository` reads `notifications`/`dlq_messages` directly rather than going through `NotificationRepository`/`DLQRepository`**
+These are aggregate queries (`COUNT(*) FILTER (...)`, `GROUP BY channel`, a `generate_series` day join) — not row-shaped CRUD, so they don't fit the existing repos' single-row/paginated-list method shapes. A separate repo keeps `NotificationRepository` focused on persisting/reading individual notifications.
+
+**`GET /api/v1/tenants/:id/analytics` is unauthenticated, alongside the other `/tenants/:id/*` routes — not under the `X-API-Key`-gated `/api/v1` group**
+Mirrors the existing tenant-route convention (`Get`, `UpdateChannels`, `UpdateRateLimits` all take `:id` as a path param with no auth, since tenant management is super-admin/open for portfolio purposes — see Phase 2 decision). Analytics is consumed by the Flutter dashboard per-tenant, the same audience as the other tenant routes, so it follows the same pattern rather than introducing a second auth model for one endpoint.
+
+**`from`/`to` default to the last 30 days, both optional, both RFC3339 — same validation convention as `historyQueryParams`**
+Reuses the exact `time.Parse(time.RFC3339, ...)` + 400-on-parse-failure pattern already used by `/notifications/history`. Defaulting `to` to `time.Now()` and `from` to `to.AddDate(0, 0, -30)` means the endpoint is useful with no query params at all, which matters for a dashboard's default "last 30 days" view.
+
+**DLQ trend fills every day in range with `generate_series`, including zero-count days, rather than only returning days that have DLQ rows**
+A chart with gaps for zero-DLQ days would be misleading (looks like missing data, not "zero incidents"). Used a `LEFT JOIN` against a `generate_series(date_trunc('day', from), date_trunc('day', to), interval '1 day')` series — first version aliased the series column as `day` and hit `ERROR: column reference "day" is ambiguous` against the same-named subquery column; fixed by aliasing the series as `g(day)` and the subquery's column as `c.count`/joining on `c.day = g.day` explicitly.
+
+**Channel breakdown only includes channels with at least one notification in range (`GROUP BY channel` with no zero-fill)**
+Unlike the DLQ trend, an empty channel isn't an interesting "zero" data point for a dashboard pie/bar chart — channels a tenant never used shouldn't appear at all, so no need for a fixed `domain.Channel` enumeration join like the day-series join above.
+
+**Verified live against local Postgres**: created a tenant, enabled email + sms, sent 4 notifications, then directly updated 2 to `delivered` and 1 to `failed` via SQL (no Kafka consumers running locally to drive real status transitions) and inserted 2 `dlq_messages` rows (one "today", one backdated one day) for the failed notification. `GET /tenants/:id/analytics` returned `total_sent: 4, total_delivered: 2, total_failed: 1`, a channel breakdown of `email: 3 sent/2 delivered (0.667 rate)` and `sms: 1 sent/1 failed (0 rate)`, and a 30-point DLQ trend with `count: 1` on each of the two seeded days and `0` everywhere else. Also verified 404 for an unknown tenant ID and 400 for an unparseable `from` query param.

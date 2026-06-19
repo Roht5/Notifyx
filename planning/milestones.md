@@ -75,11 +75,11 @@ Scheduled notifications and 90-day history cleanup.
 
 ## Phase 10 — Analytics
 Per-tenant analytics API consumed by the Flutter dashboard.
-- [ ] GET /api/v1/tenants/:id/analytics
-- [ ] Total sent, delivered, failed counts
-- [ ] Delivery rate per channel
-- [ ] DLQ trend over time
-- [ ] Channel breakdown
+- [x] GET /api/v1/tenants/:id/analytics
+- [x] Total sent, delivered, failed counts
+- [x] Delivery rate per channel
+- [x] DLQ trend over time
+- [x] Channel breakdown
 
 ## Phase 11 — Observability
 Structured logging, metrics, and tracing wired across all layers.

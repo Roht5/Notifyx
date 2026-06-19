@@ -55,6 +55,7 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	tenants.DELETE("/:id", h.Tenant.Delete)
 	tenants.PUT("/:id/channels", h.Tenant.UpdateChannels)
 	tenants.PUT("/:id/rate-limits", h.Tenant.UpdateRateLimits)
+	tenants.GET("/:id/analytics", h.Tenant.Analytics)
 	tenants.POST("/:id/keys", h.Tenant.CreateKey)
 	tenants.GET("/:id/keys", h.Tenant.ListKeys)
 	tenants.DELETE("/:id/keys/:key_id", h.Tenant.DeleteKey)

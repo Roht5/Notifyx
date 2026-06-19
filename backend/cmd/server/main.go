@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/rohit-bagade/notifyx/config"
 	"github.com/rohit-bagade/notifyx/internal/api/handlers"
 	"github.com/rohit-bagade/notifyx/internal/api/routes"
@@ -26,7 +27,6 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/scheduler"
 	"github.com/rohit-bagade/notifyx/internal/ws"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
-	goredis "github.com/redis/go-redis/v9"
 )
 
 // replayInterval is how often the rate-limit replayer re-checks queued_rate_limited
@@ -78,6 +78,7 @@ func main() {
 	deliveryRepo := postgres.NewNotificationDeliveryRepository(pool)
 	templateRepo := postgres.NewTemplateRepository(pool)
 	scheduledRepo := postgres.NewScheduledNotificationRepository(pool)
+	analyticsRepo := postgres.NewAnalyticsRepository(pool)
 
 	bgCtx, cancelBg := context.WithCancel(context.Background())
 	var bgWg sync.WaitGroup
@@ -189,6 +190,7 @@ func main() {
 			APIKeys:              apiKeyRepo,
 			Channels:             channelRepo,
 			RateLimits:           rateLimitRepo,
+			Analytics:            analyticsRepo,
 			DefaultGlobalRateCap: cfg.DefaultGlobalCap,
 			Pool:                 pool,
 		}, log),

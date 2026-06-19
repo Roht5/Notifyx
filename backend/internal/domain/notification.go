@@ -81,6 +81,29 @@ type ScheduledNotification struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// AnalyticsSummary aggregates a tenant's notification counts by status, used by the
+// Phase 10 analytics endpoint.
+type AnalyticsSummary struct {
+	TotalSent      int `json:"total_sent"`      // all notifications created in the window
+	TotalDelivered int `json:"total_delivered"` // status = delivered
+	TotalFailed    int `json:"total_failed"`    // status = failed
+}
+
+// ChannelBreakdown reports per-channel volume and delivery rate.
+type ChannelBreakdown struct {
+	Channel      Channel `json:"channel"`
+	Sent         int     `json:"sent"`
+	Delivered    int     `json:"delivered"`
+	Failed       int     `json:"failed"`
+	DeliveryRate float64 `json:"delivery_rate"` // delivered / sent, 0 when sent = 0
+}
+
+// DLQTrendPoint is one day's DLQ volume, used to chart DLQ trend over time.
+type DLQTrendPoint struct {
+	Date  time.Time `json:"date"`
+	Count int       `json:"count"`
+}
+
 // DLQMessage represents a notification that exhausted all retry attempts.
 type DLQMessage struct {
 	ID             uuid.UUID `json:"id"`

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,7 @@ type TenantService struct {
 	APIKeys              *postgres.APIKeyRepository
 	Channels             *postgres.TenantChannelRepository
 	RateLimits           *postgres.TenantRateLimitRepository
+	Analytics            *postgres.AnalyticsRepository
 	DefaultGlobalRateCap int
 	Pool                 *pgxpool.Pool
 }
@@ -403,4 +405,79 @@ func (h *TenantHandler) UpdateRateLimits(c echo.Context) error {
 		return errResponse(c, http.StatusInternalServerError, "failed to fetch rate limits")
 	}
 	return c.JSON(http.StatusOK, rateLimitsResponse{GlobalCap: tenant.GlobalRateCap, RateLimits: limits})
+}
+
+type analyticsQueryParams struct {
+	From string `query:"from"`
+	To   string `query:"to"`
+}
+
+type analyticsResponse struct {
+	Summary  *domain.AnalyticsSummary   `json:"summary"`
+	Channels []*domain.ChannelBreakdown `json:"channels"`
+	DLQTrend []*domain.DLQTrendPoint    `json:"dlq_trend"`
+	From     time.Time                  `json:"from"`
+	To       time.Time                  `json:"to"`
+}
+
+// Analytics GET /api/v1/tenants/:id/analytics
+// from/to are optional RFC3339 timestamps defaulting to the last 30 days — mirrors the
+// historyQueryParams from/to convention in notification.go.
+func (h *TenantHandler) Analytics(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid tenant id")
+	}
+
+	ctx := c.Request().Context()
+	if _, err := h.svc.Tenants.GetByID(ctx, id); err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return errResponse(c, http.StatusNotFound, "tenant not found")
+		}
+		return errResponse(c, http.StatusInternalServerError, "failed to verify tenant")
+	}
+
+	var q analyticsQueryParams
+	if err := c.Bind(&q); err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid query parameters")
+	}
+
+	to := time.Now()
+	if q.To != "" {
+		to, err = time.Parse(time.RFC3339, q.To)
+		if err != nil {
+			return errResponse(c, http.StatusBadRequest, "to must be RFC3339 (e.g. 2026-06-01T00:00:00Z)")
+		}
+	}
+	from := to.AddDate(0, 0, -30)
+	if q.From != "" {
+		from, err = time.Parse(time.RFC3339, q.From)
+		if err != nil {
+			return errResponse(c, http.StatusBadRequest, "from must be RFC3339 (e.g. 2026-06-01T00:00:00Z)")
+		}
+	}
+
+	summary, err := h.svc.Analytics.Summary(ctx, id, from, to)
+	if err != nil {
+		h.log.Errorw("analytics summary failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to compute analytics summary")
+	}
+	channels, err := h.svc.Analytics.ChannelBreakdown(ctx, id, from, to)
+	if err != nil {
+		h.log.Errorw("analytics channel breakdown failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to compute channel breakdown")
+	}
+	dlqTrend, err := h.svc.Analytics.DLQTrend(ctx, id, from, to)
+	if err != nil {
+		h.log.Errorw("analytics dlq trend failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to compute dlq trend")
+	}
+
+	return c.JSON(http.StatusOK, analyticsResponse{
+		Summary:  summary,
+		Channels: channels,
+		DLQTrend: dlqTrend,
+		From:     from,
+		To:       to,
+	})
 }
