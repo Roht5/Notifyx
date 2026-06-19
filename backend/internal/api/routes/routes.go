@@ -11,8 +11,9 @@ import (
 
 // Handlers bundles all handler types — added to as new phases are implemented.
 type Handlers struct {
-	Tenant *handlers.TenantHandler
-	Health *handlers.HealthHandler
+	Tenant       *handlers.TenantHandler
+	Health       *handlers.HealthHandler
+	Notification *handlers.NotificationHandler
 }
 
 // Setup creates the Echo instance, registers global middleware, and wires all routes.
@@ -21,9 +22,9 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	e.HideBanner = true
 
 	// Global middleware — runs on every request.
-	e.Use(echomw.RequestID())                 // adds X-Request-ID header
-	e.Use(middleware.RequestLogger(log))       // structured Zap request logging
-	e.Use(echomw.Recover())                   // recover from panics, return 500
+	e.Use(echomw.RequestID())            // adds X-Request-ID header
+	e.Use(middleware.RequestLogger(log)) // structured Zap request logging
+	e.Use(echomw.Recover())              // recover from panics, return 500
 
 	authMW := middleware.Auth(apiKeyRepo, log)
 
@@ -41,8 +42,13 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	tenants.PUT("/:id/rate-limits", h.Tenant.UpdateRateLimits)
 
 	// Authenticated API — all routes below require X-API-Key.
-	// Phases 4+ will register their routes here.
-	_ = e.Group("/api/v1", authMW)
+	api := e.Group("/api/v1", authMW)
+
+	notifications := api.Group("/notifications")
+	notifications.POST("/send", h.Notification.Send)
+	notifications.POST("/batch", h.Notification.Batch)
+	notifications.GET("/history", h.Notification.History)
+	notifications.GET("/:id", h.Notification.Get)
 
 	return e
 }

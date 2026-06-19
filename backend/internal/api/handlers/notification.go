@@ -1,0 +1,422 @@
+package handlers
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+	"github.com/rohit-bagade/notifyx/internal/domain"
+	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
+	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
+	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
+	"github.com/rohit-bagade/notifyx/pkg/logger"
+)
+
+// NotificationService groups the repositories and Kafka producer the notification handler needs.
+// Producer is nil when KAFKA_BOOTSTRAP_SERVERS isn't configured — Send/Batch still persist the
+// notification, but publishing is skipped (logged as a warning) until Kafka is wired up.
+type NotificationService struct {
+	Notifications *postgres.NotificationRepository
+	Deliveries    *postgres.NotificationDeliveryRepository
+	Channels      *postgres.TenantChannelRepository
+	Producer      *producer.Producer
+}
+
+// NotificationHandler handles all /api/v1/notifications routes.
+type NotificationHandler struct {
+	svc *NotificationService
+	log *logger.Logger
+}
+
+func NewNotificationHandler(svc *NotificationService, log *logger.Logger) *NotificationHandler {
+	return &NotificationHandler{svc: svc, log: log}
+}
+
+// --- request / response types ---
+
+type sendNotificationRequest struct {
+	Channel        string         `json:"channel"`
+	Priority       string         `json:"priority,omitempty"`
+	RecipientID    string         `json:"recipient_id,omitempty"`
+	RecipientEmail string         `json:"recipient_email,omitempty"`
+	RecipientPhone string         `json:"recipient_phone,omitempty"`
+	RecipientToken string         `json:"recipient_token,omitempty"`
+	Subject        string         `json:"subject,omitempty"`
+	Body           string         `json:"body"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+}
+
+func (r *sendNotificationRequest) Validate() error {
+	if !isValidChannel(r.Channel) {
+		return fmt.Errorf("invalid channel %q: must be one of email, push, sms, inapp", r.Channel)
+	}
+	if r.Priority != "" && !isValidPriority(r.Priority) {
+		return fmt.Errorf("invalid priority %q: must be one of critical, high, normal, low", r.Priority)
+	}
+	if r.Body == "" {
+		return errors.New("body is required")
+	}
+	return validateRecipientFields(domain.Channel(r.Channel), r.RecipientEmail, r.RecipientPhone, r.RecipientToken, r.RecipientID, r.Subject)
+}
+
+type sendNotificationResponse struct {
+	NotificationID string        `json:"notification_id"`
+	Status         domain.Status `json:"status"`
+}
+
+type batchRecipient struct {
+	RecipientID    string `json:"recipient_id,omitempty"`
+	RecipientEmail string `json:"recipient_email,omitempty"`
+	RecipientPhone string `json:"recipient_phone,omitempty"`
+	RecipientToken string `json:"recipient_token,omitempty"`
+}
+
+type batchSendRequest struct {
+	Channel    string           `json:"channel"`
+	Priority   string           `json:"priority,omitempty"`
+	Subject    string           `json:"subject,omitempty"`
+	Body       string           `json:"body"`
+	Metadata   map[string]any   `json:"metadata,omitempty"`
+	Recipients []batchRecipient `json:"recipients"`
+}
+
+func (r *batchSendRequest) Validate() error {
+	if !isValidChannel(r.Channel) {
+		return fmt.Errorf("invalid channel %q: must be one of email, push, sms, inapp", r.Channel)
+	}
+	if r.Priority != "" && !isValidPriority(r.Priority) {
+		return fmt.Errorf("invalid priority %q: must be one of critical, high, normal, low", r.Priority)
+	}
+	if r.Body == "" {
+		return errors.New("body is required")
+	}
+	if len(r.Recipients) == 0 {
+		return errors.New("recipients must not be empty")
+	}
+	channel := domain.Channel(r.Channel)
+	for i, rec := range r.Recipients {
+		if err := validateRecipientFields(channel, rec.RecipientEmail, rec.RecipientPhone, rec.RecipientToken, rec.RecipientID, r.Subject); err != nil {
+			return fmt.Errorf("recipient %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+type batchResult struct {
+	Index          int    `json:"index"`
+	NotificationID string `json:"notification_id,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+type batchSendResponse struct {
+	Results []batchResult `json:"results"`
+}
+
+type historyQueryParams struct {
+	PaginationParams
+	Channel string `query:"channel"`
+	Status  string `query:"status"`
+	From    string `query:"from"`
+	To      string `query:"to"`
+}
+
+type notificationHistoryResponse struct {
+	Notifications []*domain.Notification `json:"notifications"`
+	Total         int                    `json:"total"`
+	Page          int                    `json:"page"`
+	Limit         int                    `json:"limit"`
+}
+
+type notificationDetailResponse struct {
+	Notification *domain.Notification           `json:"notification"`
+	Deliveries   []*domain.NotificationDelivery `json:"deliveries"`
+}
+
+// --- validation helpers ---
+
+func isValidPriority(p string) bool {
+	switch domain.Priority(p) {
+	case domain.PriorityCritical, domain.PriorityHigh, domain.PriorityNormal, domain.PriorityLow:
+		return true
+	}
+	return false
+}
+
+func isValidStatus(s string) bool {
+	switch domain.Status(s) {
+	case domain.StatusPending, domain.StatusQueued, domain.StatusQueuedRateLimited, domain.StatusDelivered, domain.StatusFailed:
+		return true
+	}
+	return false
+}
+
+// validateRecipientFields checks that the recipient field required by channel is present,
+// and for email, that a subject was also given.
+func validateRecipientFields(channel domain.Channel, email, phone, token, recipientID, subject string) error {
+	switch channel {
+	case domain.ChannelEmail:
+		if email == "" {
+			return errors.New("recipient_email is required for channel email")
+		}
+		if subject == "" {
+			return errors.New("subject is required for channel email")
+		}
+	case domain.ChannelPush:
+		if token == "" {
+			return errors.New("recipient_token is required for channel push")
+		}
+	case domain.ChannelSMS:
+		if phone == "" {
+			return errors.New("recipient_phone is required for channel sms")
+		}
+	case domain.ChannelInApp:
+		if recipientID == "" {
+			return errors.New("recipient_id is required for channel inapp")
+		}
+	}
+	return nil
+}
+
+// --- handlers ---
+
+// Send POST /api/v1/notifications/send
+func (h *NotificationHandler) Send(c echo.Context) error {
+	tenant := TenantFromContext(c)
+
+	var req sendNotificationRequest
+	if err := c.Bind(&req); err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid request body")
+	}
+	if err := req.Validate(); err != nil {
+		return errResponse(c, http.StatusUnprocessableEntity, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	channel := domain.Channel(req.Channel)
+
+	enabled, err := h.svc.Channels.IsEnabled(ctx, tenant.ID, channel)
+	if err != nil {
+		h.log.Errorw("check channel enabled failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to verify channel")
+	}
+	if !enabled {
+		return errResponse(c, http.StatusForbidden, fmt.Sprintf("channel %q is not enabled for this tenant", req.Channel))
+	}
+
+	priority := domain.Priority(req.Priority)
+	if priority == "" {
+		priority = domain.PriorityNormal
+	}
+
+	notification, _, err := h.createAndQueue(ctx, postgres.CreateNotificationParams{
+		TenantID:       tenant.ID,
+		Channel:        channel,
+		Priority:       priority,
+		RecipientID:    req.RecipientID,
+		RecipientEmail: req.RecipientEmail,
+		RecipientPhone: req.RecipientPhone,
+		RecipientToken: req.RecipientToken,
+		Subject:        req.Subject,
+		Body:           req.Body,
+		Metadata:       req.Metadata,
+	})
+	if err != nil {
+		h.log.Errorw("send notification failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to send notification")
+	}
+
+	return c.JSON(http.StatusCreated, sendNotificationResponse{
+		NotificationID: notification.ID.String(),
+		Status:         notification.Status,
+	})
+}
+
+// Batch POST /api/v1/notifications/batch
+func (h *NotificationHandler) Batch(c echo.Context) error {
+	tenant := TenantFromContext(c)
+
+	var req batchSendRequest
+	if err := c.Bind(&req); err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid request body")
+	}
+	if err := req.Validate(); err != nil {
+		return errResponse(c, http.StatusUnprocessableEntity, err.Error())
+	}
+
+	ctx := c.Request().Context()
+	channel := domain.Channel(req.Channel)
+
+	enabled, err := h.svc.Channels.IsEnabled(ctx, tenant.ID, channel)
+	if err != nil {
+		h.log.Errorw("check channel enabled failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to verify channel")
+	}
+	if !enabled {
+		return errResponse(c, http.StatusForbidden, fmt.Sprintf("channel %q is not enabled for this tenant", req.Channel))
+	}
+
+	priority := domain.Priority(req.Priority)
+	if priority == "" {
+		priority = domain.PriorityNormal
+	}
+
+	results := make([]batchResult, len(req.Recipients))
+	for i, rec := range req.Recipients {
+		notification, _, err := h.createAndQueue(ctx, postgres.CreateNotificationParams{
+			TenantID:       tenant.ID,
+			Channel:        channel,
+			Priority:       priority,
+			RecipientID:    rec.RecipientID,
+			RecipientEmail: rec.RecipientEmail,
+			RecipientPhone: rec.RecipientPhone,
+			RecipientToken: rec.RecipientToken,
+			Subject:        req.Subject,
+			Body:           req.Body,
+			Metadata:       req.Metadata,
+		})
+		if err != nil {
+			h.log.Errorw("batch recipient failed", "index", i, "error", err)
+			results[i] = batchResult{Index: i, Error: "failed to send notification"}
+			continue
+		}
+		results[i] = batchResult{Index: i, NotificationID: notification.ID.String()}
+	}
+
+	return c.JSON(http.StatusCreated, batchSendResponse{Results: results})
+}
+
+// History GET /api/v1/notifications/history
+func (h *NotificationHandler) History(c echo.Context) error {
+	tenant := TenantFromContext(c)
+
+	var q historyQueryParams
+	if err := c.Bind(&q); err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid query parameters")
+	}
+	q.Normalize()
+
+	if q.Channel != "" && !isValidChannel(q.Channel) {
+		return errResponse(c, http.StatusBadRequest, fmt.Sprintf("invalid channel %q", q.Channel))
+	}
+	if q.Status != "" && !isValidStatus(q.Status) {
+		return errResponse(c, http.StatusBadRequest, fmt.Sprintf("invalid status %q", q.Status))
+	}
+
+	var from, to *time.Time
+	if q.From != "" {
+		t, err := time.Parse(time.RFC3339, q.From)
+		if err != nil {
+			return errResponse(c, http.StatusBadRequest, "from must be RFC3339 (e.g. 2026-06-01T00:00:00Z)")
+		}
+		from = &t
+	}
+	if q.To != "" {
+		t, err := time.Parse(time.RFC3339, q.To)
+		if err != nil {
+			return errResponse(c, http.StatusBadRequest, "to must be RFC3339 (e.g. 2026-06-01T00:00:00Z)")
+		}
+		to = &t
+	}
+
+	notifications, total, err := h.svc.Notifications.GetByTenantID(c.Request().Context(), tenant.ID, postgres.NotificationFilter{
+		Channel: domain.Channel(q.Channel),
+		Status:  domain.Status(q.Status),
+		From:    from,
+		To:      to,
+		Limit:   q.Limit,
+		Offset:  q.Offset(),
+	})
+	if err != nil {
+		h.log.Errorw("list notifications failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to list notifications")
+	}
+
+	return c.JSON(http.StatusOK, notificationHistoryResponse{
+		Notifications: notifications,
+		Total:         total,
+		Page:          q.Page,
+		Limit:         q.Limit,
+	})
+}
+
+// Get GET /api/v1/notifications/:id
+func (h *NotificationHandler) Get(c echo.Context) error {
+	tenant := TenantFromContext(c)
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid notification id")
+	}
+
+	ctx := c.Request().Context()
+	notification, err := h.svc.Notifications.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return errResponse(c, http.StatusNotFound, "notification not found")
+		}
+		h.log.Errorw("get notification failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to get notification")
+	}
+	// Notifications are tenant-scoped — a notification belonging to another tenant
+	// must look identical to one that doesn't exist.
+	if notification.TenantID != tenant.ID {
+		return errResponse(c, http.StatusNotFound, "notification not found")
+	}
+
+	deliveries, err := h.svc.Deliveries.GetByNotificationID(ctx, id)
+	if err != nil {
+		h.log.Errorw("get deliveries failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to get delivery status")
+	}
+
+	return c.JSON(http.StatusOK, notificationDetailResponse{
+		Notification: notification,
+		Deliveries:   deliveries,
+	})
+}
+
+// createAndQueue persists a notification and its delivery row, then publishes it to the
+// channel's Kafka topic. If the producer isn't configured (no KAFKA_BOOTSTRAP_SERVERS),
+// publishing is skipped and a warning is logged — the notification still persists so it
+// isn't lost once Kafka is wired up.
+func (h *NotificationHandler) createAndQueue(ctx context.Context, p postgres.CreateNotificationParams) (*domain.Notification, *domain.NotificationDelivery, error) {
+	notification, err := h.svc.Notifications.Create(ctx, p)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create notification: %w", err)
+	}
+
+	delivery, err := h.svc.Deliveries.Create(ctx, notification.ID, p.Channel)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create delivery: %w", err)
+	}
+
+	if h.svc.Producer == nil {
+		h.log.Warnw("kafka not configured — notification persisted but not queued for delivery",
+			"notification_id", notification.ID, "channel", p.Channel)
+		return notification, delivery, nil
+	}
+
+	msg := &kafkatypes.Message{
+		NotificationID: notification.ID,
+		DeliveryID:     delivery.ID,
+		TenantID:       p.TenantID,
+		Channel:        p.Channel,
+		Priority:       p.Priority,
+		RecipientID:    p.RecipientID,
+		RecipientEmail: p.RecipientEmail,
+		RecipientPhone: p.RecipientPhone,
+		RecipientToken: p.RecipientToken,
+		Subject:        p.Subject,
+		Body:           p.Body,
+		Metadata:       p.Metadata,
+	}
+	if err := h.svc.Producer.Publish(ctx, kafkatypes.TopicForChannel(p.Channel), msg); err != nil {
+		return nil, nil, fmt.Errorf("publish to kafka: %w", err)
+	}
+
+	return notification, delivery, nil
+}

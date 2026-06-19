@@ -51,6 +51,8 @@ func main() {
 	channelRepo := postgres.NewTenantChannelRepository(pool)
 	rateLimitRepo := postgres.NewTenantRateLimitRepository(pool)
 	dlqRepo := postgres.NewDLQRepository(pool)
+	notificationRepo := postgres.NewNotificationRepository(pool)
+	deliveryRepo := postgres.NewNotificationDeliveryRepository(pool)
 
 	// Kafka — only started when KAFKA_BOOTSTRAP_SERVERS is set.
 	// This lets the app start without Kafka during local development / DB-only testing.
@@ -84,6 +86,12 @@ func main() {
 			APIKeys:    apiKeyRepo,
 			Channels:   channelRepo,
 			RateLimits: rateLimitRepo,
+		}, log),
+		Notification: handlers.NewNotificationHandler(&handlers.NotificationService{
+			Notifications: notificationRepo,
+			Deliveries:    deliveryRepo,
+			Channels:      channelRepo,
+			Producer:      prod,
 		}, log),
 	}
 	e := routes.Setup(h, apiKeyRepo, log)
