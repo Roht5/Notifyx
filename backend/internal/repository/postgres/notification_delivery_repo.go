@@ -18,22 +18,41 @@ func NewNotificationDeliveryRepository(pool *pgxpool.Pool) *NotificationDelivery
 	return &NotificationDeliveryRepository{pool: pool}
 }
 
-// Create inserts a delivery row in the default 'queued' status.
-func (r *NotificationDeliveryRepository) Create(ctx context.Context, notificationID uuid.UUID, channel domain.Channel) (*domain.NotificationDelivery, error) {
+// Create inserts a delivery row. An empty status defaults to 'queued' (the column default);
+// the rate-limited send path passes domain.StatusQueuedRateLimited instead.
+func (r *NotificationDeliveryRepository) Create(ctx context.Context, notificationID uuid.UUID, channel domain.Channel, status domain.Status) (*domain.NotificationDelivery, error) {
+	if status == "" {
+		status = domain.StatusQueued
+	}
 	var d domain.NotificationDelivery
-	var ch, status string
+	var ch, st string
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO notification_deliveries (notification_id, channel)
-		 VALUES ($1, $2)
+		`INSERT INTO notification_deliveries (notification_id, channel, status)
+		 VALUES ($1, $2, $3)
 		 RETURNING id, notification_id, channel, status, attempts, created_at`,
-		notificationID, string(channel),
-	).Scan(&d.ID, &d.NotificationID, &ch, &status, &d.Attempts, &d.CreatedAt)
+		notificationID, string(channel), string(status),
+	).Scan(&d.ID, &d.NotificationID, &ch, &st, &d.Attempts, &d.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create notification delivery: %w", err)
 	}
 	d.Channel = domain.Channel(ch)
-	d.Status = domain.Status(status)
+	d.Status = domain.Status(st)
 	return &d, nil
+}
+
+// SetStatus is a plain status transition with no side effects — unlike UpdateStatus, it
+// doesn't bump attempts or touch delivered_at. Used by the rate-limit replayer to move a
+// delivery from queued_rate_limited to queued once its tenant's window clears; that's a
+// requeue, not a delivery attempt.
+func (r *NotificationDeliveryRepository) SetStatus(ctx context.Context, id uuid.UUID, status domain.Status) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE notification_deliveries SET status = $1 WHERE id = $2`, string(status), id)
+	if err != nil {
+		return fmt.Errorf("set delivery status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UpdateStatus records the outcome of one delivery attempt: increments the attempt
