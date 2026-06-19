@@ -73,8 +73,11 @@ func (l *Limiter) Allow(ctx context.Context, tenantID uuid.UUID, channel domain.
 	}
 
 	now := time.Now().UnixNano()
-	channelKey := fmt.Sprintf("rate:%s:%s", tenantID, channel)
-	globalKey := fmt.Sprintf("rate:%s:global", tenantID)
+	// {tenantID} as a Redis hash tag forces both keys onto the same cluster slot — without
+	// it, a clustered Redis (e.g. Upstash/ElastiCache cluster mode) hashes channelKey and
+	// globalKey to different slots and the Lua script aborts with CROSSSLOT.
+	channelKey := fmt.Sprintf("rate:{%s}:%s", tenantID, channel)
+	globalKey := fmt.Sprintf("rate:{%s}:global", tenantID)
 	member := fmt.Sprintf("%d-%s", now, uuid.NewString())
 
 	result, err := slidingWindowScript.Run(ctx, l.client,

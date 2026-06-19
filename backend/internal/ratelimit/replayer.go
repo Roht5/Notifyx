@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rohit-bagade/notifyx/internal/domain"
@@ -14,6 +15,12 @@ import (
 // batchSize caps how many queued_rate_limited notifications are re-checked per tick,
 // so one slow tick can't grow unbounded as the queue backs up.
 const batchSize = 100
+
+// maxConcurrentReplays bounds how many notifications replayOne processes at once — each
+// one is an independent rate-check/publish/status-update pipeline, so running them
+// concurrently (rather than one at a time) shrinks how long one tick blocks the
+// replayer's background goroutine.
+const maxConcurrentReplays = 16
 
 // Replayer periodically re-checks notifications that were persisted as
 // queued_rate_limited, publishing them to Kafka once their tenant's rate limit window
@@ -60,9 +67,18 @@ func (r *Replayer) replayOnce(ctx context.Context) {
 		return
 	}
 
+	sem := make(chan struct{}, maxConcurrentReplays)
+	var wg sync.WaitGroup
 	for _, n := range candidates {
-		r.replayOne(ctx, n)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(n *domain.Notification) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			r.replayOne(ctx, n)
+		}(n)
 	}
+	wg.Wait()
 }
 
 func (r *Replayer) replayOne(ctx context.Context, n *domain.Notification) {

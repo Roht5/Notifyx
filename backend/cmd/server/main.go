@@ -98,7 +98,7 @@ func main() {
 		defer redisClient.Close()
 
 		limiter = ratelimit.New(redisClient, tenantRepo, rateLimitRepo, cfg.DefaultRateLimitPerMin)
-		deduplicator = dedup.New(redisClient)
+		deduplicator = dedup.New(redisClient, cfg.DedupTTL)
 
 		replayer := ratelimit.NewReplayer(notificationRepo, deliveryRepo, limiter, prod, log)
 		bgWg.Add(1)

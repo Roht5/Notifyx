@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -41,6 +42,9 @@ type Config struct {
 	// Rate limit defaults (used when tenant has no custom config)
 	DefaultRateLimitPerMin int
 	DefaultGlobalCap       int
+
+	// Dedup
+	DedupTTL time.Duration // idempotency-key reservation window
 }
 
 // Load reads .env (if present) then overlays OS environment variables.
@@ -65,6 +69,7 @@ func Load() (*Config, error) {
 		Fast2SMSAPIKey:          getEnv("FAST2SMS_API_KEY", ""),
 		DefaultRateLimitPerMin:  getEnvInt("DEFAULT_RATE_LIMIT_PER_MIN", 60),
 		DefaultGlobalCap:        getEnvInt("DEFAULT_GLOBAL_CAP", 300),
+		DedupTTL:                time.Duration(getEnvInt("DEDUP_TTL_HOURS", 24)) * time.Hour,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -87,6 +92,9 @@ func (c *Config) Validate() error {
 	}
 	if c.DBMinConns < 0 || c.DBMinConns > c.DBMaxConns {
 		return fmt.Errorf("DB_MIN_CONNS must be between 0 and DB_MAX_CONNS (%d), got %d", c.DBMaxConns, c.DBMinConns)
+	}
+	if c.DedupTTL <= 0 {
+		return fmt.Errorf("DEDUP_TTL_HOURS must be positive, got %v", c.DedupTTL)
 	}
 	return nil
 }
