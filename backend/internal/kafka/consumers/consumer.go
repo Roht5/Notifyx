@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
-	"github.com/segmentio/kafka-go/sasl/plain"
+	"github.com/segmentio/kafka-go/sasl/scram"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
 	"github.com/rohit-bagade/notifyx/internal/metrics"
@@ -70,14 +70,16 @@ func New(cfg Config, groupID, topic string, handler HandlerFunc, prod producer.P
 		return nil, fmt.Errorf("KAFKA_BOOTSTRAP_SERVERS is required")
 	}
 
+	mechanism, err := scram.Mechanism(scram.SHA256, cfg.APIKey, cfg.APISecret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create scram mechanism: %w", err)
+	}
+
 	dialer := &kafka.Dialer{
-		Timeout:   10 * time.Second,
-		DualStack: true,
-		TLS:       &tls.Config{MinVersion: tls.VersionTLS12},
-		SASLMechanism: plain.Mechanism{
-			Username: cfg.APIKey,
-			Password: cfg.APISecret,
-		},
+		Timeout:       10 * time.Second,
+		DualStack:     true,
+		TLS:           &tls.Config{MinVersion: tls.VersionTLS12},
+		SASLMechanism: mechanism,
 	}
 
 	r := kafka.NewReader(kafka.ReaderConfig{

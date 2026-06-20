@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/segmentio/kafka-go"
-	"github.com/segmentio/kafka-go/sasl/plain"
+	"github.com/segmentio/kafka-go/sasl/scram"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/tracing"
 	"github.com/rohit-bagade/notifyx/pkg/logger"
@@ -43,14 +43,16 @@ func New(bootstrapServers, apiKey, apiSecret string, log *logger.Logger) (*Produ
 		return nil, fmt.Errorf("KAFKA_BOOTSTRAP_SERVERS is required")
 	}
 
-	// Transport holds TLS + SASL config. Confluent Cloud requires TLS 1.2+ and
-	// SASL PLAIN (API key as username, API secret as password).
+	mechanism, err := scram.Mechanism(scram.SHA256, apiKey, apiSecret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create scram mechanism: %w", err)
+	}
+
+	// Transport holds TLS + SASL config. Serverless Redpanda requires TLS 1.2+ and
+	// SASL SCRAM-SHA-256.
 	transport := &kafka.Transport{
-		TLS: &tls.Config{MinVersion: tls.VersionTLS12},
-		SASL: plain.Mechanism{
-			Username: apiKey,
-			Password: apiSecret,
-		},
+		TLS:  &tls.Config{MinVersion: tls.VersionTLS12},
+		SASL: mechanism,
 	}
 
 	// Writer without a fixed topic — we set the topic per-message so one writer
