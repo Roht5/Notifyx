@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -57,11 +58,66 @@ func (p *PaginationParams) Offset() int {
 	return (p.Page - 1) * p.Limit
 }
 
-// HealthHandler serves the /health endpoint used by Render for health checks.
-type HealthHandler struct{}
+// Pinger is the seam HealthHandler uses to verify a dependency is reachable, satisfied
+// directly by *pgxpool.Pool and by a thin Ping adapter over *redis.Client (go-redis's
+// Ping returns a *StatusCmd, not an error, so main.go wraps it before passing it in here
+// to keep this package free of a go-redis import).
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
 
-func NewHealthHandler() *HealthHandler { return &HealthHandler{} }
+// HealthHandler serves the /health endpoint used by Render for health checks. It
+// actively verifies the dependencies the app cannot run without (Postgres) and the ones
+// that are optional-but-configured (Redis), and reports Kafka's configured/disabled
+// state without probing it directly (the producer has no cheap connectivity check).
+type HealthHandler struct {
+	db              Pinger
+	redis           Pinger // nil when REDIS_URL isn't set
+	kafkaConfigured bool
+}
+
+func NewHealthHandler(db Pinger, redis Pinger, kafkaConfigured bool) *HealthHandler {
+	return &HealthHandler{db: db, redis: redis, kafkaConfigured: kafkaConfigured}
+}
 
 func (h *HealthHandler) Check(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	ctx := c.Request().Context()
+	healthy := true
+	checks := map[string]string{}
+
+	if err := h.db.Ping(ctx); err != nil {
+		checks["database"] = "down: " + err.Error()
+		healthy = false
+	} else {
+		checks["database"] = "ok"
+	}
+
+	if h.redis != nil {
+		if err := h.redis.Ping(ctx); err != nil {
+			checks["redis"] = "down: " + err.Error()
+			healthy = false
+		} else {
+			checks["redis"] = "ok"
+		}
+	} else {
+		checks["redis"] = "disabled"
+	}
+
+	if h.kafkaConfigured {
+		checks["kafka"] = "configured"
+	} else {
+		checks["kafka"] = "disabled"
+	}
+
+	status := http.StatusOK
+	overall := "ok"
+	if !healthy {
+		status = http.StatusServiceUnavailable
+		overall = "degraded"
+	}
+
+	return c.JSON(status, map[string]any{
+		"status": overall,
+		"checks": checks,
+	})
 }

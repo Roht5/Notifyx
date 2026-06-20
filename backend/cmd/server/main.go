@@ -203,9 +203,21 @@ func main() {
 		}
 	}()
 
+	// Health check — wraps go-redis's Ping (which returns *redis.StatusCmd, not an error)
+	// in a thin adapter so the handler can depend on the small Pinger interface instead of
+	// importing go-redis directly. redisHealthPinger is nil (not a non-nil interface
+	// wrapping a nil client) when Redis isn't configured, matching the producer's
+	// nil-interface convention elsewhere in this file.
+	var redisHealthPinger handlers.Pinger
+	if redisClient != nil {
+		redisHealthPinger = redisPingerFunc(func(ctx context.Context) error {
+			return redisClient.Ping(ctx).Err()
+		})
+	}
+
 	// HTTP handlers and routes.
 	h := &routes.Handlers{
-		Health: handlers.NewHealthHandler(),
+		Health: handlers.NewHealthHandler(pool, redisHealthPinger, cfg.KafkaBootstrapServers != ""),
 		WS:     ws.NewHandler(hub, presenceTracker, offlineQueue, apiKeyRepo, log),
 		Tenant: handlers.NewTenantHandler(&handlers.TenantService{
 			Tenants:              tenantRepo,
@@ -355,3 +367,10 @@ func startConsumers(
 		}(ctor.name, c)
 	}
 }
+
+// redisPingerFunc adapts a plain func to handlers.Pinger, so main.go can wrap
+// go-redis's Ping(ctx) *redis.StatusCmd into the simple Ping(ctx) error shape the
+// handler depends on, without that package importing go-redis.
+type redisPingerFunc func(ctx context.Context) error
+
+func (f redisPingerFunc) Ping(ctx context.Context) error { return f(ctx) }

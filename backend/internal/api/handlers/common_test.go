@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -100,13 +102,52 @@ func TestPaginationParams_Offset(t *testing.T) {
 	}
 }
 
-func TestHealthHandler_Check(t *testing.T) {
-	h := NewHealthHandler()
+type fakePinger struct{ err error }
+
+func (f fakePinger) Ping(ctx context.Context) error { return f.err }
+
+func TestHealthHandler_Check_AllHealthy(t *testing.T) {
+	h := NewHealthHandler(fakePinger{}, fakePinger{}, true)
 	c, rec := newCtx(http.MethodGet, "/health", "", nil)
 
 	err := h.Check(c)
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"status":"ok"}`, rec.Body.String())
+	assert.JSONEq(t, `{"status":"ok","checks":{"database":"ok","redis":"ok","kafka":"configured"}}`, rec.Body.String())
+}
+
+func TestHealthHandler_Check_RedisAndKafkaDisabled(t *testing.T) {
+	h := NewHealthHandler(fakePinger{}, nil, false)
+	c, rec := newCtx(http.MethodGet, "/health", "", nil)
+
+	err := h.Check(c)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"status":"ok","checks":{"database":"ok","redis":"disabled","kafka":"disabled"}}`, rec.Body.String())
+}
+
+func TestHealthHandler_Check_DatabaseDown(t *testing.T) {
+	h := NewHealthHandler(fakePinger{err: errors.New("connection refused")}, nil, false)
+	c, rec := newCtx(http.MethodGet, "/health", "", nil)
+
+	err := h.Check(c)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"status":"degraded"`)
+	assert.Contains(t, rec.Body.String(), "down: connection refused")
+}
+
+func TestHealthHandler_Check_RedisDown(t *testing.T) {
+	h := NewHealthHandler(fakePinger{}, fakePinger{err: errors.New("timeout")}, false)
+	c, rec := newCtx(http.MethodGet, "/health", "", nil)
+
+	err := h.Check(c)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"status":"degraded"`)
+	assert.Contains(t, rec.Body.String(), "down: timeout")
 }
