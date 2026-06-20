@@ -36,9 +36,9 @@ services:
     name: notifyx-dashboard
     runtime: static
     plan: free
-    baseDir: frontend/flutter
+    rootDir: frontend/flutter
     buildCommand: chmod +x ./render-build-frontend.sh && ./render-build-frontend.sh
-    staticPublishPath: frontend/flutter/build/web
+    staticPublishPath: build/web
     routes:
       - type: rewrite
         source: /*
