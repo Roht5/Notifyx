@@ -90,13 +90,13 @@ Structured logging, metrics, and tracing wired across all layers.
 
 ## Phase 12 — Flutter Dashboard
 All 6 screens using Bloc state management.
-- [ ] Project setup (Flutter Web, Bloc, API client)
-- [ ] Overview screen (metrics cards + charts)
-- [ ] Send Notification screen (test send form)
-- [ ] Notification History screen (table + filters)
-- [ ] Templates screen (CRUD)
-- [ ] Tenants screen (manage tenants, rate limits, channel opt-ins)
-- [ ] Analytics screen (charts — delivery rate, channel breakdown, DLQ trends)
+- [x] Project setup (Flutter Web, Bloc, API client)
+- [x] Overview screen (metrics cards + charts)
+- [x] Send Notification screen (test send form)
+- [x] Notification History screen (table + filters)
+- [x] Templates screen (CRUD)
+- [x] Tenants screen (manage tenants, rate limits, channel opt-ins)
+- [x] Analytics screen (charts — delivery rate, channel breakdown, DLQ trends)
 
 ## Phase 13 — Deployment
 Containerization and Render deployment.
