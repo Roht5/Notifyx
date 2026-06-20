@@ -32,7 +32,15 @@ type inAppPayload struct {
 // mirroring how the rate-limit replayer marks queued_rate_limited rows. With no queue
 // configured, it returns an error so the existing retry/DLQ machinery records the terminal
 // failure, the same as any other channel's permanent delivery failure.
-func NewInAppConsumer(cfg Config, prod producer.ProducerInterface, hub *ws.Hub, queue *offlinequeue.Queue, deliveries postgres.NotificationDeliveryRepositoryInterface, log *logger.Logger) (*Consumer, error) {
+// NewInAppConsumer takes hub/queue as interfaces so it can be unit-tested against mocks.
+// Callers passing a concrete *offlinequeue.Queue must pass a nil *offlinequeue.Queue (not a
+// pre-converted nil interface) when Redis isn't configured — Go's nil-interface semantics
+// mean a nil *offlinequeue.Queue boxed into the Pusher interface is itself non-nil, so we
+// detect that specific case below to preserve the original "no queue configured" behavior.
+func NewInAppConsumer(cfg Config, prod producer.ProducerInterface, hub ws.Notifier, queue offlinequeue.Pusher, deliveries postgres.NotificationDeliveryRepositoryInterface, log *logger.Logger) (*Consumer, error) {
+	if q, ok := queue.(*offlinequeue.Queue); ok && q == nil {
+		queue = nil
+	}
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
 		if msg.RecipientID == "" {
 			return fmt.Errorf("inapp handler: missing recipient_id")

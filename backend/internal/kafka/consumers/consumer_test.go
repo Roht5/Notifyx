@@ -18,6 +18,10 @@ import (
 	"github.com/rohit-bagade/notifyx/pkg/logger"
 )
 
+// assertErr is a shared sentinel error used across this package's tests to simulate
+// failures from mocked dependencies.
+var assertErr = errors.New("boom")
+
 // testLogger returns a usable *logger.Logger backed by zap's no-op-ish development
 // config — cheap enough to build per-test and avoids needing a separate constructor seam.
 func testLogger(t *testing.T) *logger.Logger {

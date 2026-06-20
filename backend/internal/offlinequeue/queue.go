@@ -17,6 +17,14 @@ type Queue struct {
 	client *redis.Client
 }
 
+// Pusher is the seam used by the in-app consumer so it can be unit-tested against a mock
+// instead of a real Redis-backed Queue.
+type Pusher interface {
+	Push(ctx context.Context, tenantID, userID string, payload []byte) error
+}
+
+var _ Pusher = (*Queue)(nil)
+
 func New(client *redis.Client) *Queue {
 	return &Queue{client: client}
 }

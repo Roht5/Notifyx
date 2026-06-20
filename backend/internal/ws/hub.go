@@ -37,6 +37,14 @@ type Hub struct {
 	log   *logger.Logger
 }
 
+// Notifier is the seam used by the in-app consumer so it can be unit-tested against a
+// mock instead of a real Hub/WebSocket connection.
+type Notifier interface {
+	SendToUser(tenantID, userID string, payload []byte) bool
+}
+
+var _ Notifier = (*Hub)(nil)
+
 func NewHub(log *logger.Logger) *Hub {
 	return &Hub{conns: make(map[string]*Conn), log: log}
 }

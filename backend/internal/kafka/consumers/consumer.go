@@ -34,11 +34,21 @@ var retryBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second
 // the retry loop; return nil to mark the message as successfully processed.
 type HandlerFunc func(ctx context.Context, msg *kafkatypes.Message) error
 
+// Reader is the seam used by Consumer.Run so it can be unit-tested against a mock
+// instead of a real Kafka broker connection.
+type Reader interface {
+	FetchMessage(ctx context.Context) (kafka.Message, error)
+	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
+	Close() error
+}
+
+var _ Reader = (*kafka.Reader)(nil)
+
 // Consumer is a reusable Kafka consumer with built-in retry and DLQ fallback.
 // Every channel consumer (email, push, sms, inapp) is an instance of this type
 // with a different topic, group ID, and HandlerFunc.
 type Consumer struct {
-	reader   *kafka.Reader
+	reader   Reader
 	producer producer.ProducerInterface // nil for the DLQ consumer itself (prevents infinite loops)
 	topic    string
 	handler  HandlerFunc
