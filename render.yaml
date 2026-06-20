@@ -34,7 +34,6 @@ services:
   - type: web
     name: notifyx-dashboard
     runtime: static
-    plan: free
     rootDir: frontend/flutter
     buildCommand: chmod +x ./render-build-frontend.sh && ./render-build-frontend.sh
     staticPublishPath: build/web
