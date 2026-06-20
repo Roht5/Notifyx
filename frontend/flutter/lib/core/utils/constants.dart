@@ -2,8 +2,8 @@ class AppConstants {
   static const String appName = 'Notifyx Dashboard';
 
   // API Constants
-  static const String baseUrl = 'http://localhost:8080/api/v1';
-  static const String wsUrl = 'ws://localhost:8080/ws';
+  static const String baseUrl = 'http://localhost:8081/api/v1';
+  static const String wsUrl = 'ws://localhost:8081/ws';
 
   // UI Constants
   static const double defaultPadding = 16.0;

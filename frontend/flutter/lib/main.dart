@@ -12,17 +12,17 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Toggle Mock Mode: Set to false to connect to the real Go backend API
-  const bool useMockRepositories = true;
+  const bool useMockRepositories = false;
 
   // Base URL config (can load from Environment variables in production)
   const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:8080',
+    defaultValue: 'http://localhost:8081',
   );
 
   const String wsBaseUrl = String.fromEnvironment(
     'WS_BASE_URL',
-    defaultValue: 'ws://localhost:8080',
+    defaultValue: 'ws://localhost:8081',
   );
 
   final apiClient = ApiClient(baseUrl: apiBaseUrl);
