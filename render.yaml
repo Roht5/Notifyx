@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: notifyx-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    preDeployCommand: ./migrate
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        fromDatabase:
+          name: notifyx-db
+          property: connectionString
+      - key: DB_MAX_CONNS
+        value: 10
+      - key: DB_MIN_CONNS
+        value: 0
+      - key: DEFAULT_RATE_LIMIT_PER_MIN
+        value: 60
+      - key: DEFAULT_GLOBAL_CAP
+        value: 300
+      - key: DEDUP_TTL_HOURS
+        value: 24
+      # Set these manually in the Render dashboard (secrets, not committed):
+      # REDIS_URL, KAFKA_BOOTSTRAP_SERVERS, KAFKA_API_KEY, KAFKA_API_SECRET,
+      # RESEND_API_KEY, RESEND_FROM_EMAIL, FIREBASE_CREDENTIALS_JSON, FAST2SMS_API_KEY
+
+databases:
+  - name: notifyx-db
+    plan: free
+    databaseName: notifyx
+    user: notifyx

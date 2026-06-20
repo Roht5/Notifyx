@@ -115,17 +115,28 @@ Configuration is loaded from environment variables or a local `.env` file at sta
 
 ## 🏃 Local Development Setup
 
-### 1. Database Migrations
-Notifyx runs versioned database migrations automatically on startup using [golang-migrate](https://github.com/golang-migrate/migrate). Ensure your PostgreSQL database is running and configured via `DATABASE_URL`.
-
-### 2. Launch the Backend Server
-Navigate to the `backend/` directory and compile/run the application:
+### Option A — Docker Compose (full stack)
+Brings up Postgres, Redis, Kafka, the API, and Prometheus/Grafana together:
 ```bash
-cd backend
-go run cmd/server/main.go
+docker compose up --build
 ```
+This runs the `migrate` service (via `cmd/migrate`, see below) once against Postgres before the `api` service starts, then serves the API at `http://localhost:8080`, Prometheus at `http://localhost:9090`, and Grafana at `http://localhost:3000` (admin/admin).
 
-The server will validate configurations, run database migrations, start the background rate-limit replayer, initialize Kafka consumers, and bind to your configured port (e.g. `http://localhost:8080`).
+### Option B — Go binary against local services
+1. **Database Migrations** — Notifyx applies versioned migrations via a separate binary ([golang-migrate](https://github.com/golang-migrate/migrate) under the hood), not automatically inside the server process (see `decisions.md`, "migrations-on-startup"):
+   ```bash
+   cd backend
+   DATABASE_URL=postgres://user:password@localhost:5432/notifyx?sslmode=disable go run ./cmd/migrate
+   ```
+2. **Launch the Backend Server**:
+   ```bash
+   go run ./cmd/server
+   ```
+
+The server will validate configuration, start the background rate-limit replayer, initialize Kafka consumers (if `KAFKA_BOOTSTRAP_SERVERS` is set), and bind to your configured port (e.g. `http://localhost:8080`). Redis and Kafka are optional locally — omitting `REDIS_URL`/`KAFKA_BOOTSTRAP_SERVERS` degrades gracefully (rate limiting/dedup/offline-queue disabled, or no event consumers) rather than failing to start.
+
+### Deploying to Render
+`render.yaml` defines a single Web Service (Docker runtime, built from `backend/Dockerfile`) plus a managed Postgres database, with `./migrate` wired in as the Pre-Deploy Command so schema migrations run once per deploy, ahead of the new instance taking traffic. Secrets not safe to commit (`REDIS_URL`, `KAFKA_*`, `RESEND_API_KEY`, `FIREBASE_CREDENTIALS_JSON`, `FAST2SMS_API_KEY`) are set manually in the Render dashboard.
 
 ---
 

@@ -100,9 +100,9 @@ All 6 screens using Bloc state management.
 
 ## Phase 13 — Deployment
 Containerization and Render deployment.
-- [ ] Dockerfile (multi-stage Go build)
-- [ ] docker-compose.yml (Go + PostgreSQL + Redis + Kafka + Grafana)
-- [ ] .env.example
-- [ ] Render deployment config (render.yaml)
-- [ ] Move `postgres.RunMigrations` out of `main()` into Render's Pre-Deploy Command (see decisions.md, "migrations-on-startup")
-- [ ] README with setup instructions
+- [x] Dockerfile (multi-stage Go build)
+- [x] docker-compose.yml (Go + PostgreSQL + Redis + Kafka + Grafana)
+- [x] .env.example
+- [x] Render deployment config (render.yaml)
+- [x] Move `postgres.RunMigrations` out of `main()` into Render's Pre-Deploy Command (see decisions.md, "migrations-on-startup")
+- [x] README with setup instructions

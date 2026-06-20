@@ -58,9 +58,8 @@ func main() {
 
 	log.Infow("starting Notifyx", "env", cfg.Env, "port", cfg.Port)
 
-	if err := postgres.RunMigrations(cfg.DatabaseURL, "migrations", log); err != nil {
-		log.Fatal("migration failed", "error", err)
-	}
+	// Migrations run via the separate `cmd/migrate` binary (Render's Pre-Deploy
+	// Command in production), not here — see decisions.md, "migrations-on-startup".
 
 	// Tracing — spans are written as JSON lines to traces.jsonl rather than shipped to a
 	// collector, since this deployment has no OTel collector/Jaeger backend running. Good
