@@ -23,7 +23,7 @@ class AppTheme {
               fontWeight: FontWeight.bold,
             ),
           ),
-      cardTheme: const CardThemeData(
+      cardTheme: const CardTheme(
         color: AppColors.surfaceCard,
         elevation: 0,
         margin: EdgeInsets.zero,
