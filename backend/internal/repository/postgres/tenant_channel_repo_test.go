@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v3"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -137,10 +138,27 @@ func TestTenantChannelRepository_IsEnabled_NoRowMeansFalse(t *testing.T) {
 
 	mock.ExpectQuery("SELECT enabled FROM tenant_channels WHERE tenant_id = \\$1 AND channel = \\$2").
 		WithArgs(tenantID, string(domain.ChannelSMS)).
-		WillReturnError(errors.New("no rows"))
+		WillReturnError(pgx.ErrNoRows)
 
 	enabled, err := repo.IsEnabled(context.Background(), tenantID, domain.ChannelSMS)
-	require.NoError(t, err) // implementation swallows the error and returns false, nil
+	require.NoError(t, err) // no row means not opted in, not an error
 	assert.False(t, enabled)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTenantChannelRepository_IsEnabled_QueryError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	repo := NewTenantChannelRepository(mock)
+	tenantID := uuid.New()
+
+	mock.ExpectQuery("SELECT enabled FROM tenant_channels WHERE tenant_id = \\$1 AND channel = \\$2").
+		WithArgs(tenantID, string(domain.ChannelSMS)).
+		WillReturnError(errors.New("connection reset"))
+
+	_, err = repo.IsEnabled(context.Background(), tenantID, domain.ChannelSMS)
+	require.Error(t, err) // a real DB error must propagate, not be swallowed as "disabled"
 	assert.NoError(t, mock.ExpectationsWereMet())
 }

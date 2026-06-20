@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v3"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -141,10 +142,27 @@ func TestTenantRateLimitRepository_GetByChannel_NotSetReturnsNilNil(t *testing.T
 
 	mock.ExpectQuery("SELECT (.|\n)*FROM tenant_rate_limits WHERE tenant_id = \\$1 AND channel = \\$2").
 		WithArgs(tenantID, string(domain.ChannelSMS)).
-		WillReturnError(errors.New("no rows"))
+		WillReturnError(pgx.ErrNoRows)
 
 	rl, err := repo.GetByChannel(context.Background(), tenantID, domain.ChannelSMS)
-	require.NoError(t, err) // implementation swallows the error
+	require.NoError(t, err) // no row means "use default", not an error
 	assert.Nil(t, rl)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTenantRateLimitRepository_GetByChannel_QueryError(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	repo := NewTenantRateLimitRepository(mock)
+	tenantID := uuid.New()
+
+	mock.ExpectQuery("SELECT (.|\n)*FROM tenant_rate_limits WHERE tenant_id = \\$1 AND channel = \\$2").
+		WithArgs(tenantID, string(domain.ChannelSMS)).
+		WillReturnError(errors.New("connection reset"))
+
+	_, err = repo.GetByChannel(context.Background(), tenantID, domain.ChannelSMS)
+	require.Error(t, err) // a real DB error must propagate, not be swallowed as "no override"
 	assert.NoError(t, mock.ExpectationsWereMet())
 }

@@ -188,6 +188,27 @@ func TestHandler_Connect_DBError(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
+func TestHandler_Connect_UpgradeFailsOnPlainHTTPRequest(t *testing.T) {
+	// Auth succeeds, but the request lacks the WebSocket upgrade headers (since we use
+	// a plain http.Get instead of dialing), so upgrader.Upgrade itself should fail.
+	env := newTestEnv(t, false)
+
+	tenantID := uuid.New()
+	tenant := &domain.Tenant{ID: tenantID, Name: "Acme"}
+	env.repo.On("GetTenantByKeyHash", mock.Anything, handlers.HashAPIKey("validkey")).Return(tenant, nil)
+
+	q := url.Values{
+		"tenantId": {tenantID.String()},
+		"userId":   {"user1"},
+		"apiKey":   {"validkey"},
+	}
+
+	resp, err := http.Get(strings.Replace(env.wsURL(q), "ws://", "http://", 1))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.NotEqual(t, http.StatusSwitchingProtocols, resp.StatusCode)
+}
+
 func TestHandler_Connect_KeyBelongsToDifferentTenant(t *testing.T) {
 	env := newTestEnv(t, false)
 
