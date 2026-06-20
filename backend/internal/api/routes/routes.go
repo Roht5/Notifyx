@@ -22,7 +22,8 @@ type Handlers struct {
 }
 
 // Setup creates the Echo instance, registers global middleware, and wires all routes.
-func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logger) *echo.Echo {
+// env is config.Config.Env ("development" | "production") — it only affects the CORS policy.
+func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logger, env string) *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 
@@ -31,13 +32,25 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	e.Use(middleware.RequestLogger(log)) // structured Zap request logging
 	e.Use(echomw.Recover())              // recover from panics, return 500
 	e.Use(metrics.EchoMiddleware())      // Prometheus request latency histogram
+
 	// CORS — needed once the Flutter Web dashboard (Phase 12) calls this API from a
-	// different origin. AllowOrigins is "*" for now since the dashboard is unauthenticated
-	// (see decisions.md); tighten to the deployed dashboard origin once one exists.
-	e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, "X-API-Key"},
-	}))
+	// different origin. In development, CORS is fully open (any origin, any method/header)
+	// so the Flutter web dev server (which runs on a random/changing localhost port) never
+	// hits a preflight rejection. In production, still "*" for now since the dashboard is
+	// unauthenticated (see decisions.md) — tighten to the deployed dashboard origin once
+	// one exists, but development stays permissive regardless.
+	if env == "development" {
+		e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
+			AllowOrigins: []string{"*"},
+			AllowMethods: []string{echo.GET, echo.HEAD, echo.PUT, echo.PATCH, echo.POST, echo.DELETE, echo.OPTIONS},
+			AllowHeaders: []string{"*"},
+		}))
+	} else {
+		e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
+			AllowOrigins: []string{"*"},
+			AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, "X-API-Key"},
+		}))
+	}
 
 	authMW := middleware.Auth(apiKeyRepo, log)
 
@@ -60,7 +73,9 @@ func Setup(h *Handlers, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logge
 	tenants.PUT("/:id", h.Tenant.Update)
 	tenants.DELETE("/:id", h.Tenant.Delete)
 	tenants.PUT("/:id/channels", h.Tenant.UpdateChannels)
+	tenants.GET("/:id/channels", h.Tenant.GetChannels)
 	tenants.PUT("/:id/rate-limits", h.Tenant.UpdateRateLimits)
+	tenants.GET("/:id/rate-limits", h.Tenant.GetRateLimits)
 	tenants.GET("/:id/analytics", h.Tenant.Analytics)
 	tenants.POST("/:id/keys", h.Tenant.CreateKey)
 	tenants.GET("/:id/keys", h.Tenant.ListKeys)

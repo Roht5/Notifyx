@@ -224,7 +224,7 @@ func main() {
 			Templates: templateRepo,
 		}, log),
 	}
-	e := routes.Setup(h, apiKeyRepo, log)
+	e := routes.Setup(h, apiKeyRepo, log, cfg.Env)
 
 	// Start HTTP server in its own goroutine so the signal handler below can run.
 	go func() {

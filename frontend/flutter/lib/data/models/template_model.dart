@@ -23,7 +23,7 @@ class TemplateModel {
       id: json['id'] ?? '',
       tenantId: json['tenant_id'] ?? '',
       name: json['name'] ?? '',
-      channel: json['channel'] ?? '',
+      channel: json['channel'] == 'inapp' ? 'websocket' : (json['channel'] ?? ''),
       subject: json['subject'],
       body: json['body'] ?? '',
       createdAt: json['created_at'] != null
@@ -37,7 +37,7 @@ class TemplateModel {
       'id': id,
       'tenant_id': tenantId,
       'name': name,
-      'channel': channel,
+      'channel': channel == 'websocket' ? 'inapp' : channel,
       'subject': subject,
       'body': body,
       'created_at': createdAt.toIso8601String(),

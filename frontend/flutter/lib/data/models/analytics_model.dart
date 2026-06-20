@@ -56,7 +56,7 @@ class ChannelBreakdown {
 
   factory ChannelBreakdown.fromJson(Map<String, dynamic> json) {
     return ChannelBreakdown(
-      channel: json['channel'] ?? '',
+      channel: json['channel'] == 'inapp' ? 'websocket' : (json['channel'] ?? ''),
       sent: json['sent'] ?? 0,
       delivered: json['delivered'] ?? 0,
       failed: json['failed'] ?? 0,

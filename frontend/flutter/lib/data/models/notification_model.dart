@@ -46,7 +46,7 @@ class NotificationModel {
     return NotificationModel(
       id: json['id'] ?? '',
       tenantId: json['tenant_id'] ?? '',
-      channel: json['channel'] ?? '',
+      channel: json['channel'] == 'inapp' ? 'websocket' : (json['channel'] ?? ''),
       priority: json['priority'] ?? 'normal',
       status: json['status'] ?? 'pending',
       recipientId: json['recipient_id'] ?? '',

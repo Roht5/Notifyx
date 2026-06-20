@@ -88,12 +88,13 @@ func (r *NotificationRepository) GetByID(ctx context.Context, id uuid.UUID) (*do
 
 // NotificationFilter narrows GetByTenantID — zero values mean "no filter" on that field.
 type NotificationFilter struct {
-	Channel domain.Channel
-	Status  domain.Status
-	From    *time.Time
-	To      *time.Time
-	Limit   int
-	Offset  int
+	Channel   domain.Channel
+	Status    domain.Status
+	From      *time.Time
+	To        *time.Time
+	Limit     int
+	Offset    int
+	Recipient string
 }
 
 // GetByTenantID returns a page of notifications for tenantID along with the total
@@ -109,9 +110,14 @@ func (r *NotificationRepository) GetByTenantID(ctx context.Context, tenantID uui
 		   AND ($3 = '' OR status = $3)
 		   AND ($4::timestamptz IS NULL OR created_at >= $4)
 		   AND ($5::timestamptz IS NULL OR created_at <= $5)
+		   AND ($8 = '' OR
+		        recipient_id ILIKE '%' || $8 || '%' OR
+		        recipient_email ILIKE '%' || $8 || '%' OR
+		        recipient_phone ILIKE '%' || $8 || '%' OR
+		        recipient_token ILIKE '%' || $8 || '%')
 		 ORDER BY created_at DESC
 		 LIMIT $6 OFFSET $7`,
-		tenantID, string(f.Channel), string(f.Status), f.From, f.To, f.Limit, f.Offset,
+		tenantID, string(f.Channel), string(f.Status), f.From, f.To, f.Limit, f.Offset, f.Recipient,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list notifications: %w", err)

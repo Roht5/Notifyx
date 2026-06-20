@@ -179,10 +179,11 @@ type batchSendResponse struct {
 
 type historyQueryParams struct {
 	PaginationParams
-	Channel string `query:"channel"`
-	Status  string `query:"status"`
-	From    string `query:"from"`
-	To      string `query:"to"`
+	Channel   string `query:"channel"`
+	Status    string `query:"status"`
+	From      string `query:"from"`
+	To        string `query:"to"`
+	Recipient string `query:"recipient"`
 }
 
 type notificationHistoryResponse struct {
@@ -529,12 +530,13 @@ func (h *NotificationHandler) History(c echo.Context) error {
 	}
 
 	notifications, total, err := h.svc.Notifications.GetByTenantID(c.Request().Context(), tenant.ID, postgres.NotificationFilter{
-		Channel: domain.Channel(q.Channel),
-		Status:  domain.Status(q.Status),
-		From:    from,
-		To:      to,
-		Limit:   q.Limit,
-		Offset:  q.Offset(),
+		Channel:   domain.Channel(q.Channel),
+		Status:    domain.Status(q.Status),
+		From:      from,
+		To:        to,
+		Limit:     q.Limit,
+		Offset:    q.Offset(),
+		Recipient: q.Recipient,
 	})
 	if err != nil {
 		h.log.Errorw("list notifications failed", "error", err)

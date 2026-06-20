@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../logger/request_logger.dart';
 
 class ApiClient {
   final Dio dio;
@@ -29,7 +30,29 @@ class ApiClient {
           return handler.next(options);
         },
         onError: (DioException error, handler) {
-          // Log or map global network errors
+          final requestOptions = error.requestOptions;
+          final response = error.response;
+
+          final StringBuffer logBuffer = StringBuffer();
+          logBuffer.writeln('=== FAILED REQUEST ===');
+          logBuffer.writeln('URI: ${requestOptions.uri}');
+          logBuffer.writeln('Method: ${requestOptions.method}');
+          logBuffer.writeln('Headers: ${requestOptions.headers}');
+          if (requestOptions.data != null) {
+            logBuffer.writeln('Request Data: ${requestOptions.data}');
+          }
+          
+          if (response != null) {
+            logBuffer.writeln('Status Code: ${response.statusCode}');
+            logBuffer.writeln('Response Headers: ${response.headers}');
+            logBuffer.writeln('Response Data: ${response.data}');
+          } else {
+            logBuffer.writeln('No response received (Network timeout/error).');
+          }
+          logBuffer.writeln('Error Message: ${error.message}');
+          logBuffer.writeln('======================');
+
+          RequestLogger.logError(logBuffer.toString());
           return handler.next(error);
         },
       ),

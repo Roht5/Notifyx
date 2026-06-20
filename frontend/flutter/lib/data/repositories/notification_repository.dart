@@ -24,6 +24,17 @@ abstract class NotificationRepository {
     required Map<String, dynamic> metadata,
     String? idempotencyKey,
   });
+  Future<List<String>> batchSend({
+    required String tenantId,
+    required String channel,
+    required List<String> recipientIds,
+    required String priority,
+    String? templateId,
+    String? subject,
+    required String body,
+    required Map<String, dynamic> metadata,
+    String? idempotencyKey,
+  });
 }
 
 class HttpNotificationRepository implements NotificationRepository {
@@ -40,9 +51,19 @@ class HttpNotificationRepository implements NotificationRepository {
     int limit = 50,
     int offset = 0,
   }) async {
-    final Map<String, dynamic> queryParams = {'limit': limit, 'offset': offset};
+    // Go backend expects page index instead of offset: page = (offset ~/ limit) + 1
+    final int page = (offset ~/ limit) + 1;
+    final Map<String, dynamic> queryParams = {'limit': limit, 'page': page};
     if (status != null && status.isNotEmpty) queryParams['status'] = status;
-    if (channel != null && channel.isNotEmpty) queryParams['channel'] = channel;
+    
+    if (channel != null && channel.isNotEmpty) {
+      // Map 'websocket' to backend's 'inapp'
+      final backendChannel = channel == 'websocket' ? 'inapp' : channel;
+      queryParams['channel'] = backendChannel;
+    }
+    
+    // Note: Go backend history query filter does not natively support 'recipient' search,
+    // but we still pass it if supported or fallback to UI filters.
     if (recipientSearch != null && recipientSearch.isNotEmpty) {
       queryParams['recipient'] = recipientSearch;
     }
@@ -73,8 +94,11 @@ class HttpNotificationRepository implements NotificationRepository {
     required Map<String, dynamic> metadata,
     String? idempotencyKey,
   }) async {
+    // Map channel 'websocket' -> 'inapp' for backend validation
+    final backendChannel = channel == 'websocket' ? 'inapp' : channel;
+    
     final Map<String, dynamic> postData = {
-      'channel': channel,
+      'channel': backendChannel,
       'recipient_id': recipientId,
       'priority': priority,
       'body': body,
@@ -91,7 +115,82 @@ class HttpNotificationRepository implements NotificationRepository {
       '/api/v1/notifications/send',
       data: postData,
     );
-    return NotificationModel.fromJson(response.data as Map<String, dynamic>);
+    
+    // Go backend only returns {"notification_id": string, "status": string}
+    final data = response.data as Map<String, dynamic>;
+    final notificationId = data['notification_id'] ?? '';
+    final responseStatus = data['status'] ?? 'pending';
+
+    // Construct a synthetic NotificationModel with correct keys for frontend rendering
+    return NotificationModel(
+      id: notificationId,
+      tenantId: tenantId,
+      channel: channel,
+      priority: priority,
+      status: responseStatus,
+      recipientId: recipientId,
+      recipientEmail: recipientEmail,
+      recipientPhone: recipientPhone,
+      recipientToken: recipientToken,
+      templateId: templateId,
+      subject: subject,
+      body: body,
+      metadata: metadata,
+      idempotencyKey: idempotencyKey,
+      createdAt: DateTime.now(),
+      attempts: [],
+    );
+  }
+
+  @override
+  Future<List<String>> batchSend({
+    required String tenantId,
+    required String channel,
+    required List<String> recipientIds,
+    required String priority,
+    String? templateId,
+    String? subject,
+    required String body,
+    required Map<String, dynamic> metadata,
+    String? idempotencyKey,
+  }) async {
+    final backendChannel = channel == 'websocket' ? 'inapp' : channel;
+    
+    final List<Map<String, dynamic>> recipients = recipientIds.map((id) {
+      return {
+        'recipient_id': id,
+        if (channel == 'email') 'recipient_email': id,
+        if (channel == 'sms') 'recipient_phone': id,
+        if (channel == 'push') 'recipient_token': id,
+      };
+    }).toList();
+
+    final Map<String, dynamic> postData = {
+      'channel': backendChannel,
+      'priority': priority,
+      'body': body,
+      'metadata': metadata,
+      'recipients': recipients,
+    };
+    if (templateId != null) postData['template_id'] = templateId;
+    if (subject != null) postData['subject'] = subject;
+    if (idempotencyKey != null) postData['idempotency_key'] = idempotencyKey;
+
+    final response = await apiClient.dio.post(
+      '/api/v1/notifications/batch',
+      data: postData,
+    );
+    
+    final Map<String, dynamic> data = response.data as Map<String, dynamic>;
+    final List<dynamic> results = data['results'] ?? [];
+    
+    final List<String> notificationIds = [];
+    for (final item in results) {
+      if (item['notification_id'] != null) {
+        notificationIds.add(item['notification_id'].toString());
+      }
+    }
+    return notificationIds;
   }
 }
 
@@ -298,5 +397,39 @@ class MockNotificationRepository implements NotificationRepository {
     });
 
     return newNotif;
+  }
+
+  @override
+  Future<List<String>> batchSend({
+    required String tenantId,
+    required String channel,
+    required List<String> recipientIds,
+    required String priority,
+    String? templateId,
+    String? subject,
+    required String body,
+    required Map<String, dynamic> metadata,
+    String? idempotencyKey,
+  }) async {
+    await Future.delayed(const Duration(milliseconds: 600));
+    final List<String> ids = [];
+    for (final recipientId in recipientIds) {
+      final notif = await sendNotification(
+        tenantId: tenantId,
+        channel: channel,
+        recipientId: recipientId,
+        recipientEmail: channel == 'email' ? recipientId : null,
+        recipientPhone: channel == 'sms' ? recipientId : null,
+        recipientToken: channel == 'push' ? recipientId : null,
+        priority: priority,
+        templateId: templateId,
+        subject: subject,
+        body: body,
+        metadata: metadata,
+        idempotencyKey: idempotencyKey,
+      );
+      ids.add(notif.id);
+    }
+    return ids;
   }
 }

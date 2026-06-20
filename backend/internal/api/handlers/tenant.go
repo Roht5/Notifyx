@@ -407,6 +407,56 @@ func (h *TenantHandler) UpdateRateLimits(c echo.Context) error {
 	return c.JSON(http.StatusOK, rateLimitsResponse{GlobalCap: tenant.GlobalRateCap, RateLimits: limits})
 }
 
+// GetChannels GET /api/v1/tenants/:id/channels
+func (h *TenantHandler) GetChannels(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid tenant id")
+	}
+
+	ctx := c.Request().Context()
+	if _, err := h.svc.Tenants.GetByID(ctx, id); err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return errResponse(c, http.StatusNotFound, "tenant not found")
+		}
+		return errResponse(c, http.StatusInternalServerError, "failed to verify tenant")
+	}
+
+	channels, err := h.svc.Channels.GetByTenantID(ctx, id)
+	if err != nil {
+		h.log.Errorw("get tenant channels failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to get channels")
+	}
+
+	return c.JSON(http.StatusOK, channels)
+}
+
+// GetRateLimits GET /api/v1/tenants/:id/rate-limits
+func (h *TenantHandler) GetRateLimits(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errResponse(c, http.StatusBadRequest, "invalid tenant id")
+	}
+
+	ctx := c.Request().Context()
+	tenant, err := h.svc.Tenants.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, postgres.ErrNotFound) {
+			return errResponse(c, http.StatusNotFound, "tenant not found")
+		}
+		return errResponse(c, http.StatusInternalServerError, "failed to verify tenant")
+	}
+
+	limits, err := h.svc.RateLimits.GetByTenantID(ctx, id)
+	if err != nil {
+		h.log.Errorw("get tenant rate limits failed", "error", err)
+		return errResponse(c, http.StatusInternalServerError, "failed to get rate limits")
+	}
+
+	return c.JSON(http.StatusOK, rateLimitsResponse{GlobalCap: tenant.GlobalRateCap, RateLimits: limits})
+}
+
+
 type analyticsQueryParams struct {
 	From string `query:"from"`
 	To   string `query:"to"`
