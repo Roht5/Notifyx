@@ -17,7 +17,7 @@ import (
 // NewPushConsumer creates a consumer for the notifyx.push topic that sends through Firebase FCM.
 // See NewEmailConsumer for why terminal "failed" status is recorded in the DLQ consumer instead
 // of here.
-func NewPushConsumer(cfg Config, prod *producer.Producer, client *push.Client, deliveries *postgres.NotificationDeliveryRepository, log *logger.Logger) (*Consumer, error) {
+func NewPushConsumer(cfg Config, prod producer.ProducerInterface, client push.Sender, deliveries postgres.NotificationDeliveryRepositoryInterface, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
 		if msg.RecipientToken == "" {
 			return fmt.Errorf("push handler: missing recipient_token")

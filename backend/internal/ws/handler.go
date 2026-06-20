@@ -28,11 +28,11 @@ type Handler struct {
 	hub        *Hub
 	presence   *presence.Tracker
 	queue      *offlinequeue.Queue
-	apiKeyRepo *postgres.APIKeyRepository
+	apiKeyRepo postgres.APIKeyRepositoryInterface
 	log        *logger.Logger
 }
 
-func NewHandler(hub *Hub, presenceTracker *presence.Tracker, queue *offlinequeue.Queue, apiKeyRepo *postgres.APIKeyRepository, log *logger.Logger) *Handler {
+func NewHandler(hub *Hub, presenceTracker *presence.Tracker, queue *offlinequeue.Queue, apiKeyRepo postgres.APIKeyRepositoryInterface, log *logger.Logger) *Handler {
 	return &Handler{hub: hub, presence: presenceTracker, queue: queue, apiKeyRepo: apiKeyRepo, log: log}
 }
 

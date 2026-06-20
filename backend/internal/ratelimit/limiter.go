@@ -50,15 +50,15 @@ return 1
 // backed by Redis sorted sets.
 type Limiter struct {
 	client     *redis.Client
-	tenants    *postgres.TenantRepository
-	rateLimits *postgres.TenantRateLimitRepository
+	tenants    postgres.TenantRepositoryInterface
+	rateLimits postgres.TenantRateLimitRepositoryInterface
 	defaultMax int
 }
 
 // New takes only a per-channel default — the global cap always comes from
 // Tenant.GlobalRateCap (every tenant has a concrete value from the moment it's created),
 // so there's no "not configured yet" case for it to fall back from here.
-func New(client *redis.Client, tenants *postgres.TenantRepository, rateLimits *postgres.TenantRateLimitRepository, defaultMaxPerMin int) *Limiter {
+func New(client *redis.Client, tenants postgres.TenantRepositoryInterface, rateLimits postgres.TenantRateLimitRepositoryInterface, defaultMaxPerMin int) *Limiter {
 	return &Limiter{client: client, tenants: tenants, rateLimits: rateLimits, defaultMax: defaultMaxPerMin}
 }
 

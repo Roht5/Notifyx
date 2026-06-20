@@ -39,7 +39,7 @@ type HandlerFunc func(ctx context.Context, msg *kafkatypes.Message) error
 // with a different topic, group ID, and HandlerFunc.
 type Consumer struct {
 	reader   *kafka.Reader
-	producer *producer.Producer // nil for the DLQ consumer itself (prevents infinite loops)
+	producer producer.ProducerInterface // nil for the DLQ consumer itself (prevents infinite loops)
 	topic    string
 	handler  HandlerFunc
 	log      *logger.Logger
@@ -55,7 +55,7 @@ type Config struct {
 // New creates a Consumer subscribed to topic with the given consumer group ID.
 // prod may be nil — when nil, messages that exhaust all retries are logged and
 // dropped rather than re-published to the DLQ (used by the DLQ consumer itself).
-func New(cfg Config, groupID, topic string, handler HandlerFunc, prod *producer.Producer, log *logger.Logger) (*Consumer, error) {
+func New(cfg Config, groupID, topic string, handler HandlerFunc, prod producer.ProducerInterface, log *logger.Logger) (*Consumer, error) {
 	if cfg.BootstrapServers == "" {
 		return nil, fmt.Errorf("KAFKA_BOOTSTRAP_SERVERS is required")
 	}

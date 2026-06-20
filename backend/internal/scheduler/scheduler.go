@@ -25,18 +25,18 @@ const maxConcurrentFires = 16
 // may be nil (Kafka not configured) — in that case the row is deliberately left unfired so
 // a retry once Kafka is wired up will still pick it up, instead of silently losing it.
 type Scheduler struct {
-	scheduled     *postgres.ScheduledNotificationRepository
-	notifications *postgres.NotificationRepository
-	deliveries    *postgres.NotificationDeliveryRepository
-	producer      *producer.Producer
+	scheduled     postgres.ScheduledNotificationRepositoryInterface
+	notifications postgres.NotificationRepositoryInterface
+	deliveries    postgres.NotificationDeliveryRepositoryInterface
+	producer      producer.ProducerInterface
 	log           *logger.Logger
 }
 
 func New(
-	scheduled *postgres.ScheduledNotificationRepository,
-	notifications *postgres.NotificationRepository,
-	deliveries *postgres.NotificationDeliveryRepository,
-	prod *producer.Producer,
+	scheduled postgres.ScheduledNotificationRepositoryInterface,
+	notifications postgres.NotificationRepositoryInterface,
+	deliveries postgres.NotificationDeliveryRepositoryInterface,
+	prod producer.ProducerInterface,
 	log *logger.Logger,
 ) *Scheduler {
 	return &Scheduler{scheduled: scheduled, notifications: notifications, deliveries: deliveries, producer: prod, log: log}

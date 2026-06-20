@@ -13,9 +13,19 @@ import (
 // table — the cron-poll side of Phase 9. The notification itself (with status=pending and
 // scheduled_at set) is persisted separately by NotificationRepository.Create; this table just
 // tracks which notification IDs are due and whether they've already been fired.
+// ScheduledNotificationRepositoryInterface is the seam used by the scheduler so it can
+// be unit-tested against a mock instead of a real Postgres connection.
+type ScheduledNotificationRepositoryInterface interface {
+	Create(ctx context.Context, notificationID uuid.UUID, scheduledAt time.Time) (*domain.ScheduledNotification, error)
+	GetDueUnfired(ctx context.Context, now time.Time, limit int) ([]*domain.ScheduledNotification, error)
+	MarkFired(ctx context.Context, id uuid.UUID) error
+}
+
 type ScheduledNotificationRepository struct {
 	pool Executor
 }
+
+var _ ScheduledNotificationRepositoryInterface = (*ScheduledNotificationRepository)(nil)
 
 func NewScheduledNotificationRepository(pool Executor) *ScheduledNotificationRepository {
 	return &ScheduledNotificationRepository{pool: pool}

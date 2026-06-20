@@ -19,7 +19,7 @@ import (
 // the shared retry/DLQ machinery in Consumer handle retries — the DLQ consumer is the one
 // that records the terminal "failed" status, so attempts/error_message reflect one row per
 // Kafka-level delivery outcome rather than incrementing on every retry.
-func NewEmailConsumer(cfg Config, prod *producer.Producer, client *email.Client, deliveries *postgres.NotificationDeliveryRepository, log *logger.Logger) (*Consumer, error) {
+func NewEmailConsumer(cfg Config, prod producer.ProducerInterface, client email.Sender, deliveries postgres.NotificationDeliveryRepositoryInterface, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
 		if msg.RecipientEmail == "" {
 			return fmt.Errorf("email handler: missing recipient_email")

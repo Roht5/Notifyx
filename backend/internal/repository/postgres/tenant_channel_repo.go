@@ -2,15 +2,27 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
+
+// TenantChannelRepositoryInterface is the seam used by handlers so they can be
+// unit-tested against a mock instead of a real Postgres connection.
+type TenantChannelRepositoryInterface interface {
+	Upsert(ctx context.Context, tenantID uuid.UUID, channel domain.Channel, enabled bool) error
+	GetByTenantID(ctx context.Context, tenantID uuid.UUID) ([]*domain.TenantChannel, error)
+	IsEnabled(ctx context.Context, tenantID uuid.UUID, channel domain.Channel) (bool, error)
+}
 
 type TenantChannelRepository struct {
 	pool Executor
 }
+
+var _ TenantChannelRepositoryInterface = (*TenantChannelRepository)(nil)
 
 func NewTenantChannelRepository(pool Executor) *TenantChannelRepository {
 	return &TenantChannelRepository{pool: pool}
@@ -66,7 +78,10 @@ func (r *TenantChannelRepository) IsEnabled(ctx context.Context, tenantID uuid.U
 		tenantID, string(channel),
 	).Scan(&enabled)
 	if err != nil {
-		return false, nil // no row means not opted in
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil // no row means not opted in
+		}
+		return false, fmt.Errorf("check tenant channel enabled: %w", err)
 	}
 	return enabled, nil
 }

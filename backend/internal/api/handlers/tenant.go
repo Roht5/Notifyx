@@ -21,11 +21,11 @@ import (
 // writes to commit or roll back together (Create, UpdateChannels, UpdateRateLimits)
 // can open a transaction and construct tx-scoped repos against it.
 type TenantService struct {
-	Tenants              *postgres.TenantRepository
-	APIKeys              *postgres.APIKeyRepository
-	Channels             *postgres.TenantChannelRepository
-	RateLimits           *postgres.TenantRateLimitRepository
-	Analytics            *postgres.AnalyticsRepository
+	Tenants              postgres.TenantRepositoryInterface
+	APIKeys              postgres.APIKeyRepositoryInterface
+	Channels             postgres.TenantChannelRepositoryInterface
+	RateLimits           postgres.TenantRateLimitRepositoryInterface
+	Analytics            postgres.AnalyticsRepositoryInterface
 	DefaultGlobalRateCap int
 	Pool                 *pgxpool.Pool
 }

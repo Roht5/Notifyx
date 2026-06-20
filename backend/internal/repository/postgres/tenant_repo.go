@@ -9,12 +9,25 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
+// TenantRepositoryInterface is the seam used by handlers/ratelimit so they can be
+// unit-tested against a mock instead of a real Postgres connection.
+type TenantRepositoryInterface interface {
+	Create(ctx context.Context, name string, globalRateCap int) (*domain.Tenant, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.Tenant, error)
+	GetAll(ctx context.Context) ([]*domain.Tenant, error)
+	Update(ctx context.Context, id uuid.UUID, name string) (*domain.Tenant, error)
+	UpdateGlobalRateCap(ctx context.Context, id uuid.UUID, globalRateCap int) (*domain.Tenant, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 // TenantRepository handles all DB operations for the tenants table.
 // pool is an Executor (not *pgxpool.Pool directly) so the same repository type
 // can also be constructed against a transaction — see WithTx in db.go.
 type TenantRepository struct {
 	pool Executor
 }
+
+var _ TenantRepositoryInterface = (*TenantRepository)(nil)
 
 func NewTenantRepository(pool Executor) *TenantRepository {
 	return &TenantRepository{pool: pool}

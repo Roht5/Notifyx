@@ -42,6 +42,12 @@ type serviceAccount struct {
 	TokenURI    string `json:"token_uri"`
 }
 
+// Sender is the seam used by the push consumer so it can be unit-tested against a
+// mock instead of a real FCM HTTP call.
+type Sender interface {
+	Send(ctx context.Context, token, title, body string) (string, error)
+}
+
 type Client struct {
 	projectID   string
 	clientEmail string
@@ -53,6 +59,8 @@ type Client struct {
 	accessToken string
 	expiresAt   time.Time
 }
+
+var _ Sender = (*Client)(nil)
 
 // NewClient loads and parses a Firebase service-account JSON key file from path.
 func NewClient(credentialsPath string) (*Client, error) {

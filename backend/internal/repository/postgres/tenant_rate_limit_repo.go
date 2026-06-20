@@ -2,15 +2,27 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
+
+// TenantRateLimitRepositoryInterface is the seam used by handlers/ratelimit so they
+// can be unit-tested against a mock instead of a real Postgres connection.
+type TenantRateLimitRepositoryInterface interface {
+	Upsert(ctx context.Context, tenantID uuid.UUID, channel domain.Channel, maxPerMin int) error
+	GetByTenantID(ctx context.Context, tenantID uuid.UUID) ([]*domain.TenantRateLimit, error)
+	GetByChannel(ctx context.Context, tenantID uuid.UUID, channel domain.Channel) (*domain.TenantRateLimit, error)
+}
 
 type TenantRateLimitRepository struct {
 	pool Executor
 }
+
+var _ TenantRateLimitRepositoryInterface = (*TenantRateLimitRepository)(nil)
 
 func NewTenantRateLimitRepository(pool Executor) *TenantRateLimitRepository {
 	return &TenantRateLimitRepository{pool: pool}
@@ -67,7 +79,10 @@ func (r *TenantRateLimitRepository) GetByChannel(ctx context.Context, tenantID u
 		tenantID, string(channel),
 	).Scan(&rl.ID, &rl.TenantID, &ch, &rl.MaxPerMin, &rl.CreatedAt)
 	if err != nil {
-		return nil, nil // nil means "use default"
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // nil means "use default"
+		}
+		return nil, fmt.Errorf("get rate limit by channel: %w", err)
 	}
 	rl.Channel = domain.Channel(ch)
 	return &rl, nil

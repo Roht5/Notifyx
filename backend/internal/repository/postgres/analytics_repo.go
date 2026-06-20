@@ -13,9 +13,19 @@ import (
 // analytics endpoint. It reads from notifications and dlq_messages directly rather
 // than going through NotificationRepository/DLQRepository, since these are
 // aggregate queries, not row-shaped CRUD.
+// AnalyticsRepositoryInterface is the seam used by handlers so they can be unit-tested
+// against a mock instead of a real Postgres connection.
+type AnalyticsRepositoryInterface interface {
+	Summary(ctx context.Context, tenantID uuid.UUID, from, to time.Time) (*domain.AnalyticsSummary, error)
+	ChannelBreakdown(ctx context.Context, tenantID uuid.UUID, from, to time.Time) ([]*domain.ChannelBreakdown, error)
+	DLQTrend(ctx context.Context, tenantID uuid.UUID, from, to time.Time) ([]*domain.DLQTrendPoint, error)
+}
+
 type AnalyticsRepository struct {
 	pool Executor
 }
+
+var _ AnalyticsRepositoryInterface = (*AnalyticsRepository)(nil)
 
 func NewAnalyticsRepository(pool Executor) *AnalyticsRepository {
 	return &AnalyticsRepository{pool: pool}

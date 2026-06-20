@@ -10,12 +10,25 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
+// NotificationRepositoryInterface is the seam used by handlers/scheduler/ratelimit so
+// they can be unit-tested against a mock instead of a real Postgres connection.
+type NotificationRepositoryInterface interface {
+	Create(ctx context.Context, p CreateNotificationParams) (*domain.Notification, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.Notification, error)
+	GetByTenantID(ctx context.Context, tenantID uuid.UUID, f NotificationFilter) ([]*domain.Notification, int, error)
+	GetByStatus(ctx context.Context, status domain.Status, limit int) ([]*domain.Notification, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.Status) error
+	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
+}
+
 // NotificationRepository handles all DB operations for the notifications table.
 // pool is an Executor (not *pgxpool.Pool directly) so the same repository type
 // can also be constructed against a transaction — see WithTx in db.go.
 type NotificationRepository struct {
 	pool Executor
 }
+
+var _ NotificationRepositoryInterface = (*NotificationRepository)(nil)
 
 func NewNotificationRepository(pool Executor) *NotificationRepository {
 	return &NotificationRepository{pool: pool}

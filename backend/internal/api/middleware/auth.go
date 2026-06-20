@@ -12,7 +12,7 @@ import (
 
 // Auth returns an Echo middleware that validates the X-API-Key header and
 // injects the authenticated *domain.Tenant into the request context.
-func Auth(apiKeyRepo *postgres.APIKeyRepository, log *logger.Logger) echo.MiddlewareFunc {
+func Auth(apiKeyRepo postgres.APIKeyRepositoryInterface, log *logger.Logger) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			key := c.Request().Header.Get("X-API-Key")

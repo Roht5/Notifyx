@@ -22,10 +22,18 @@ import (
 // confluent-kafka-go requires CGO + librdkafka headers. segmentio/kafka-go is
 // pure Go, builds without system dependencies, and speaks the same Kafka wire
 // protocol — fully compatible with Confluent Cloud.
+// ProducerInterface is the seam used by handlers/consumers/scheduler so they can be
+// unit-tested against a mock instead of a real Kafka connection.
+type ProducerInterface interface {
+	Publish(ctx context.Context, topic string, msg *kafkatypes.Message) error
+}
+
 type Producer struct {
 	writer *kafka.Writer
 	log    *logger.Logger
 }
+
+var _ ProducerInterface = (*Producer)(nil)
 
 // New creates a producer connected to Confluent Cloud.
 // bootstrapServers is the host:port from the Confluent Cloud cluster settings.

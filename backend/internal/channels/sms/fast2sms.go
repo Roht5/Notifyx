@@ -17,10 +17,18 @@ var sendURL = "https://www.fast2sms.com/dev/bulkV2"
 
 const requestTimeout = 10 * time.Second
 
+// Sender is the seam used by the sms consumer so it can be unit-tested against a
+// mock instead of a real Fast2SMS HTTP call.
+type Sender interface {
+	Send(ctx context.Context, phone, message string) (string, error)
+}
+
 type Client struct {
 	apiKey string
 	http   *http.Client
 }
+
+var _ Sender = (*Client)(nil)
 
 func NewClient(apiKey string) *Client {
 	return &Client{

@@ -28,18 +28,18 @@ const maxConcurrentReplays = 16
 // transition still happens but publishing is skipped, the same convention used for a
 // fresh send in the handler.
 type Replayer struct {
-	notifications *postgres.NotificationRepository
-	deliveries    *postgres.NotificationDeliveryRepository
+	notifications postgres.NotificationRepositoryInterface
+	deliveries    postgres.NotificationDeliveryRepositoryInterface
 	limiter       *Limiter
-	producer      *producer.Producer
+	producer      producer.ProducerInterface
 	log           *logger.Logger
 }
 
 func NewReplayer(
-	notifications *postgres.NotificationRepository,
-	deliveries *postgres.NotificationDeliveryRepository,
+	notifications postgres.NotificationRepositoryInterface,
+	deliveries postgres.NotificationDeliveryRepositoryInterface,
 	limiter *Limiter,
-	prod *producer.Producer,
+	prod producer.ProducerInterface,
 	log *logger.Logger,
 ) *Replayer {
 	return &Replayer{notifications: notifications, deliveries: deliveries, limiter: limiter, producer: prod, log: log}

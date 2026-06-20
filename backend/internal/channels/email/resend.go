@@ -19,11 +19,19 @@ var sendURL = "https://api.resend.com/emails"
 // consumer's retry loop indefinitely — handleWithRetry's own backoff handles spacing.
 const requestTimeout = 10 * time.Second
 
+// Sender is the seam used by the email consumer so it can be unit-tested against a
+// mock instead of a real Resend HTTP call.
+type Sender interface {
+	Send(ctx context.Context, to, subject, body string) (string, error)
+}
+
 type Client struct {
 	apiKey    string
 	fromEmail string
 	http      *http.Client
 }
+
+var _ Sender = (*Client)(nil)
 
 func NewClient(apiKey, fromEmail string) *Client {
 	return &Client{

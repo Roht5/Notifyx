@@ -32,7 +32,7 @@ type inAppPayload struct {
 // mirroring how the rate-limit replayer marks queued_rate_limited rows. With no queue
 // configured, it returns an error so the existing retry/DLQ machinery records the terminal
 // failure, the same as any other channel's permanent delivery failure.
-func NewInAppConsumer(cfg Config, prod *producer.Producer, hub *ws.Hub, queue *offlinequeue.Queue, deliveries *postgres.NotificationDeliveryRepository, log *logger.Logger) (*Consumer, error) {
+func NewInAppConsumer(cfg Config, prod producer.ProducerInterface, hub *ws.Hub, queue *offlinequeue.Queue, deliveries postgres.NotificationDeliveryRepositoryInterface, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
 		if msg.RecipientID == "" {
 			return fmt.Errorf("inapp handler: missing recipient_id")

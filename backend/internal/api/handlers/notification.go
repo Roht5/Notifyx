@@ -12,12 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
-	"github.com/rohit-bagade/notifyx/internal/dedup"
 	"github.com/rohit-bagade/notifyx/internal/domain"
 	kafkatypes "github.com/rohit-bagade/notifyx/internal/kafka"
 	"github.com/rohit-bagade/notifyx/internal/kafka/producer"
 	"github.com/rohit-bagade/notifyx/internal/metrics"
-	"github.com/rohit-bagade/notifyx/internal/ratelimit"
 	"github.com/rohit-bagade/notifyx/internal/repository/postgres"
 	tmplrender "github.com/rohit-bagade/notifyx/internal/template"
 	"github.com/rohit-bagade/notifyx/internal/tracing"
@@ -34,15 +32,31 @@ import (
 // Notifications/Deliveries repos above so createAndQueue can open a transaction and
 // construct tx-scoped repos against it (persist + publish commit or roll back together).
 type NotificationService struct {
-	Notifications *postgres.NotificationRepository
-	Deliveries    *postgres.NotificationDeliveryRepository
-	Channels      *postgres.TenantChannelRepository
-	Templates     *postgres.TemplateRepository
-	Scheduled     *postgres.ScheduledNotificationRepository
-	Producer      *producer.Producer
-	RateLimiter   *ratelimit.Limiter
-	Dedup         *dedup.Deduplicator
+	Notifications postgres.NotificationRepositoryInterface
+	Deliveries    postgres.NotificationDeliveryRepositoryInterface
+	Channels      postgres.TenantChannelRepositoryInterface
+	Templates     postgres.TemplateRepositoryInterface
+	Scheduled     postgres.ScheduledNotificationRepositoryInterface
+	Producer      producer.ProducerInterface
+	RateLimiter   RateLimiterInterface
+	Dedup         DedupInterface
 	Pool          *pgxpool.Pool
+}
+
+// RateLimiterInterface is the minimal seam over *ratelimit.Limiter the notification
+// handler needs — introduced here (rather than in the ratelimit package) so handler
+// tests can mock it without dragging in a real Redis client. *ratelimit.Limiter already
+// satisfies this.
+type RateLimiterInterface interface {
+	Allow(ctx context.Context, tenantID uuid.UUID, channel domain.Channel) (bool, error)
+}
+
+// DedupInterface is the minimal seam over *dedup.Deduplicator the notification handler
+// needs — introduced here for the same reason as RateLimiterInterface. *dedup.Deduplicator
+// already satisfies this.
+type DedupInterface interface {
+	Reserve(ctx context.Context, idempotencyKey string, notificationID uuid.UUID) (claimed bool, existingID uuid.UUID, err error)
+	Release(ctx context.Context, idempotencyKey string) error
 }
 
 // NotificationHandler handles all /api/v1/notifications routes.

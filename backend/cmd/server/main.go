@@ -153,7 +153,15 @@ func main() {
 	// Rate-limit replayer — needs the real (possibly-nil) Kafka producer, so it's built
 	// after the Kafka block runs rather than alongside the rest of Redis setup above.
 	if redisClient != nil {
-		replayer := ratelimit.NewReplayer(notificationRepo, deliveryRepo, limiter, prod, log)
+		// prod is *kafkaproducer.Producer; pass it through a typed-nil-safe conversion so
+		// NewReplayer's producer.ProducerInterface parameter is a true nil interface (not a
+		// non-nil interface wrapping a nil pointer) when Kafka isn't configured — otherwise
+		// replayer.go's `r.producer != nil` check would incorrectly evaluate true.
+		var prodIface kafkaproducer.ProducerInterface
+		if prod != nil {
+			prodIface = prod
+		}
+		replayer := ratelimit.NewReplayer(notificationRepo, deliveryRepo, limiter, prodIface, log)
 		bgWg.Add(1)
 		go func() {
 			defer bgWg.Done()

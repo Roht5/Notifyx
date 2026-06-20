@@ -17,7 +17,7 @@ import (
 // NewSMSConsumer creates a consumer for the notifyx.sms topic that sends through Fast2SMS.
 // See NewEmailConsumer for why terminal "failed" status is recorded in the DLQ consumer instead
 // of here.
-func NewSMSConsumer(cfg Config, prod *producer.Producer, client *sms.Client, deliveries *postgres.NotificationDeliveryRepository, log *logger.Logger) (*Consumer, error) {
+func NewSMSConsumer(cfg Config, prod producer.ProducerInterface, client sms.Sender, deliveries postgres.NotificationDeliveryRepositoryInterface, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
 		if msg.RecipientPhone == "" {
 			return fmt.Errorf("sms handler: missing recipient_phone")

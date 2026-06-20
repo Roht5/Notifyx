@@ -9,10 +9,21 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
+// APIKeyRepositoryInterface is the seam used by handlers/middleware so they can be
+// unit-tested against a mock instead of a real Postgres connection.
+type APIKeyRepositoryInterface interface {
+	Create(ctx context.Context, tenantID uuid.UUID, keyHash string) (*domain.APIKey, error)
+	GetTenantByKeyHash(ctx context.Context, keyHash string) (*domain.Tenant, error)
+	GetByTenantID(ctx context.Context, tenantID uuid.UUID) ([]*domain.APIKey, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 // APIKeyRepository handles storage and lookup of hashed API keys.
 type APIKeyRepository struct {
 	pool Executor
 }
+
+var _ APIKeyRepositoryInterface = (*APIKeyRepository)(nil)
 
 func NewAPIKeyRepository(pool Executor) *APIKeyRepository {
 	return &APIKeyRepository{pool: pool}

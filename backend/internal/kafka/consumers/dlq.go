@@ -21,7 +21,7 @@ import (
 // The producer is intentionally nil — if the DLQ handler itself fails after
 // all retries, the message is logged and dropped (not re-published to DLQ)
 // to prevent an infinite retry loop.
-func NewDLQConsumer(cfg Config, dlqRepo *postgres.DLQRepository, notifications *postgres.NotificationRepository, deliveries *postgres.NotificationDeliveryRepository, log *logger.Logger) (*Consumer, error) {
+func NewDLQConsumer(cfg Config, dlqRepo postgres.DLQRepositoryInterface, notifications postgres.NotificationRepositoryInterface, deliveries postgres.NotificationDeliveryRepositoryInterface, log *logger.Logger) (*Consumer, error) {
 	handler := func(ctx context.Context, msg *kafkatypes.Message) error {
 		reason := msg.LastError
 		if reason == "" {

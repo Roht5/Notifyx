@@ -9,10 +9,22 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
+// TemplateRepositoryInterface is the seam used by handlers so they can be unit-tested
+// against a mock instead of a real Postgres connection.
+type TemplateRepositoryInterface interface {
+	Create(ctx context.Context, tenantID uuid.UUID, name string, channel domain.Channel, subject, body string) (*domain.NotificationTemplate, error)
+	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*domain.NotificationTemplate, error)
+	ListByTenant(ctx context.Context, tenantID uuid.UUID) ([]*domain.NotificationTemplate, error)
+	Update(ctx context.Context, tenantID, id uuid.UUID, name string, channel domain.Channel, subject, body string) (*domain.NotificationTemplate, error)
+	Delete(ctx context.Context, tenantID, id uuid.UUID) error
+}
+
 // TemplateRepository handles all DB operations for the notification_templates table.
 type TemplateRepository struct {
 	pool Executor
 }
+
+var _ TemplateRepositoryInterface = (*TemplateRepository)(nil)
 
 func NewTemplateRepository(pool Executor) *TemplateRepository {
 	return &TemplateRepository{pool: pool}

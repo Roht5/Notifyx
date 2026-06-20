@@ -8,12 +8,23 @@ import (
 	"github.com/rohit-bagade/notifyx/internal/domain"
 )
 
+// NotificationDeliveryRepositoryInterface is the seam used by handlers/consumers so
+// they can be unit-tested against a mock instead of a real Postgres connection.
+type NotificationDeliveryRepositoryInterface interface {
+	Create(ctx context.Context, notificationID uuid.UUID, channel domain.Channel, status domain.Status) (*domain.NotificationDelivery, error)
+	SetStatus(ctx context.Context, id uuid.UUID, status domain.Status) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.Status, errorMessage string) error
+	GetByNotificationID(ctx context.Context, notificationID uuid.UUID) ([]*domain.NotificationDelivery, error)
+}
+
 // NotificationDeliveryRepository handles all DB operations for the notification_deliveries table.
 // pool is an Executor (not *pgxpool.Pool directly) so the same repository type
 // can also be constructed against a transaction — see WithTx in db.go.
 type NotificationDeliveryRepository struct {
 	pool Executor
 }
+
+var _ NotificationDeliveryRepositoryInterface = (*NotificationDeliveryRepository)(nil)
 
 func NewNotificationDeliveryRepository(pool Executor) *NotificationDeliveryRepository {
 	return &NotificationDeliveryRepository{pool: pool}

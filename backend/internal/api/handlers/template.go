@@ -14,7 +14,7 @@ import (
 
 // TemplateService groups the repository the template handler needs.
 type TemplateService struct {
-	Templates *postgres.TemplateRepository
+	Templates postgres.TemplateRepositoryInterface
 }
 
 // TemplateHandler handles all /api/v1/templates routes.
