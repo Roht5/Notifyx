@@ -6,7 +6,6 @@ services:
     dockerContext: ./backend
     plan: free
     healthCheckPath: /health
-    preDeployCommand: ./migrate
     envVars:
       - key: PORT
         value: 8080

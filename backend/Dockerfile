@@ -18,6 +18,7 @@ RUN apk add --no-cache ca-certificates
 COPY --from=build /out/notifyx ./notifyx
 COPY --from=build /out/migrate ./migrate
 COPY --from=build /src/migrations ./migrations
+COPY entrypoint.sh ./entrypoint.sh
 
 EXPOSE 8080
-ENTRYPOINT ["./notifyx"]
+ENTRYPOINT ["./entrypoint.sh"]
