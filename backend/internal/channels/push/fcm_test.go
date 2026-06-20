@@ -9,14 +9,12 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// writeTestCredentials generates a throwaway RSA key, writes a service-account-shaped
-// JSON file pointed at the given token endpoint, and returns its path.
+// writeTestCredentials generates a throwaway RSA key, creates a service-account-shaped
+// JSON payload pointed at the given token endpoint, and returns it as a string.
 func writeTestCredentials(t *testing.T, tokenURI string) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -40,11 +38,7 @@ func writeTestCredentials(t *testing.T, tokenURI string) string {
 		t.Fatalf("marshal service account: %v", err)
 	}
 
-	path := filepath.Join(t.TempDir(), "creds.json")
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write creds file: %v", err)
-	}
-	return path
+	return string(raw)
 }
 
 func TestSend_Success(t *testing.T) {
@@ -64,7 +58,7 @@ func TestSend_Success(t *testing.T) {
 	}))
 	defer tokenSrv.Close()
 
-	credsPath := writeTestCredentials(t, tokenSrv.URL)
+	credsJSON := writeTestCredentials(t, tokenSrv.URL)
 
 	fcmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer fake-access-token" {
@@ -86,7 +80,7 @@ func TestSend_Success(t *testing.T) {
 	fcmBaseURL = fcmSrv.URL
 	defer func() { fcmBaseURL = origBase }()
 
-	c, err := NewClient(credsPath)
+	c, err := NewClient(credsJSON)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -101,11 +95,7 @@ func TestSend_Success(t *testing.T) {
 }
 
 func TestNewClient_MissingFields(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "creds.json")
-	if err := os.WriteFile(path, []byte(`{"project_id":"x"}`), 0o600); err != nil {
-		t.Fatalf("write creds file: %v", err)
-	}
-	if _, err := NewClient(path); err == nil {
+	if _, err := NewClient(`{"project_id":"x"}`); err == nil {
 		t.Fatal("NewClient() error = nil, want non-nil for missing private_key/client_email")
 	}
 }

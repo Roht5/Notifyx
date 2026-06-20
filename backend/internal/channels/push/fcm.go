@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 )
@@ -62,15 +61,13 @@ type Client struct {
 
 var _ Sender = (*Client)(nil)
 
-// NewClient loads and parses a Firebase service-account JSON key file from path.
-func NewClient(credentialsPath string) (*Client, error) {
-	raw, err := os.ReadFile(credentialsPath)
-	if err != nil {
-		return nil, fmt.Errorf("read firebase credentials file: %w", err)
-	}
-
+// NewClient parses credentialsJSON — the raw Firebase service-account JSON content
+// (e.g. from the FIREBASE_CREDENTIALS_JSON env var), not a file path. Never wrap parse
+// errors with the input itself: a malformed/path-like value here is very likely the
+// secret itself, and embedding it in an error gets it written straight to logs.
+func NewClient(credentialsJSON string) (*Client, error) {
 	var sa serviceAccount
-	if err := json.Unmarshal(raw, &sa); err != nil {
+	if err := json.Unmarshal([]byte(credentialsJSON), &sa); err != nil {
 		return nil, fmt.Errorf("parse firebase credentials JSON: %w", err)
 	}
 	if sa.ProjectID == "" || sa.PrivateKey == "" || sa.ClientEmail == "" {
